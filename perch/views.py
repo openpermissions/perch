@@ -211,6 +211,13 @@ def admin_emails(doc):
 
 
 @view('registry', '1.0.0')
+def active_organisations(doc):
+    """View for getting active organisations"""
+    if doc.get('type') == 'organisation' and doc.get('state') != 'deactivated':
+        yield doc.get('state'), doc['_id']
+
+
+@view('registry', '1.0.0')
 def organisations(doc):
     """View for getting organisations"""
     if doc.get('type') == 'organisation':
@@ -227,7 +234,7 @@ def organisation_name(doc):
 @view('registry', '1.0.0')
 def reference_links(doc):
     """Get reference links"""
-    if doc.get('type') == 'organisation':
+    if doc.get('type') == 'organisation' and doc.get('state') != 'deactivated':
         for asset_id_type, link in doc.get('reference_links', {}).items():
             # TODO: The API expects this data structure, but we should change
             # it because there is always only one entry in "links".
@@ -238,6 +245,24 @@ def reference_links(doc):
                 }
             }
             yield asset_id_type, value
+
+
+@view('registry', '1.0.0')
+def active_services(doc):
+    """View for getting active services"""
+    if doc.get('state') != 'deactivated':
+        for service_id, service in doc.get('services', {}).items():
+            if service.get('state') != 'deactivated':
+                service_type = service.get('service_type')
+                org = doc['_id']
+                service['id'] = service_id
+                service['organisation_id'] = org
+
+                yield service_id, service
+                yield [service_type, org], service
+                yield [service_type, None], service
+                yield [None, org], service
+                yield [None, None], service
 
 
 @view('registry', '1.0.0')
@@ -254,6 +279,20 @@ def services(doc):
         yield [service_type, None], service
         yield [None, org], service
         yield [None, None], service
+
+
+@view('registry', '1.0.0')
+def active_service_location(doc):
+    """View for getting active service by location"""
+    if doc.get('state') != 'deactivated':
+        for service_id, service in doc.get('services', {}).items():
+            if service.get('state') != 'deactivated':
+                service['id'] = service_id
+                service['organisation_id'] = doc['_id']
+
+                location = service.get('location', None)
+                if location:
+                    yield location, service
 
 
 @view('registry', '1.0.0')
@@ -295,6 +334,18 @@ def oauth_client(doc):
 
 
 @view('registry', '1.0.0')
+def active_repositories(doc):
+    """View for getting active repositories"""
+    if doc.get('state') != 'deactivated':
+        for repository_id, repo in doc.get('repositories', {}).items():
+            if repo.get('state') != 'deactivated':
+                repo['id'] = repository_id
+                repo['organisation_id'] = doc['_id']
+
+                yield repository_id, repo
+
+
+@view('registry', '1.0.0')
 def repositories(doc):
     """View for getting repositories"""
     for repository_id, repo in doc.get('repositories', {}).items():
@@ -323,15 +374,17 @@ def service_and_repository(doc):
 
     Used in the auth service
     """
-    if doc.get('type') == 'organisation':
+    if doc.get('type') == 'organisation' and doc.get('state') != 'deactivated':
         for repository_id, repo in doc.get('repositories', {}).items():
-            repo['id'] = repository_id
-            repo['organisation_id'] = doc['_id']
+            if repo.get('state') != 'deactivated':
+                repo['id'] = repository_id
+                repo['organisation_id'] = doc['_id']
 
-            yield repository_id, repo
+                yield repository_id, repo
 
         for service_id, service in doc.get('services', {}).items():
-            service['id'] = service_id
-            service['organisation_id'] = service['id']
+            if service.get('state') != 'deactivated':
+                service['id'] = service_id
+                service['organisation_id'] = service['id']
 
-            yield service_id, service
+                yield service_id, service

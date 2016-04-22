@@ -21,7 +21,6 @@ from voluptuous import All, Extra, In, Length, Required, Schema
 
 from . import views, exceptions, validators
 from .model import Document, SubResource, State, VALID_STATES
-from .organisation import Organisation
 
 
 __all__ = ['User', 'UserOrganisation', 'Token']
@@ -221,11 +220,6 @@ class User(Document):
 
         return user_role == role.value and state == State.approved.value
 
-    @coroutine
-    def can_delete(self, user):
-        """Admin or user can delete a user"""
-        raise Return(user.id == self.id or user.is_admin())
-
     @classmethod
     @coroutine
     def remove_organisation_from_all(cls, organisation_id):
@@ -284,6 +278,7 @@ class UserOrganisation(SubResource):
     parent_key = 'organisations'
     view = views.user_organisations_resource
     internal_fields = ['id', 'user_id']
+    state_field = 'join_state'
 
     schema = Schema({
         'id': unicode,
@@ -296,31 +291,29 @@ class UserOrganisation(SubResource):
     def organisation_id(self):
         return self.id
 
-    @classmethod
     @coroutine
-    def can_create(cls, user, **kwargs):
-        if 'join_state' in kwargs:
-            if not user.is_admin() and kwargs['join_state'] != State.default.value:
-                raise Return(False)
-
-        raise Return(True)
+    def can_approve(self, user, **data):
+        """
+        Only org admins can approve joining an organisation
+        :param user: a User
+        :param data: data that the user wants to update
+        """
+        is_org_admin = user.is_org_admin(self.organisation_id)
+        raise Return(is_org_admin)
 
     @coroutine
     def can_update(self, user, **kwargs):
-        if not user.is_org_admin(self.organisation_id):
+        # Can only update if org admin or user being updated
+        if not (user.id == self.id or user.is_org_admin(self.organisation_id)):
             raise Return((False, []))
 
-        if 'role' in kwargs and self.join_state != State.approved.value:
-            raise exceptions.ValidationError(
-                'User is not an approved member of {}'
-                .format(self.organisation_id))
+        if 'role' in kwargs:
+            if not user.is_org_admin(self.organisation_id):
+                raise Return((False, {'role'}))
+
+            if self.join_state != State.approved.value:
+                raise exceptions.ValidationError(
+                    'User is not an approved member of {}'
+                    .format(self.organisation_id))
 
         raise Return((True, []))
-
-    @coroutine
-    def can_delete(self, user, **kwargs):
-        if not (user.is_org_admin(self.organisation_id)
-                or user.id == self.user_id):
-            raise Return(False)
-
-        raise Return(True)
