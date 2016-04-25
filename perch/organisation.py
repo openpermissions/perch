@@ -433,6 +433,9 @@ class Service(SubResource):
         :param resource: a Resource or SubResource with "permissions" attribute
         :returns: True if has access, False otherwise
         """
+        if {self.state, resource.state} != {State.approved.value}:
+            return False
+
         permissions = group_permissions(getattr(resource, 'permissions', []))
 
         org_permissions = permissions['organisation_id'][self.organisation_id]
