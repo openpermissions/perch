@@ -112,7 +112,7 @@ class Document(object):
 
     @property
     def _state(self):
-        return self._resource[self.state_field]
+        return self._resource.get(self.state_field)
 
     @property
     def id(self):
@@ -180,9 +180,11 @@ class Document(object):
     @classmethod
     @coroutine
     def create(cls, user, **kwargs):
+        resource = cls(**kwargs)
+
         if user:
             can_create = yield cls.can_create(user, **kwargs)
-            can_approve = yield cls.can_approve(user, **kwargs)
+            can_approve = yield resource.can_approve(user, **kwargs)
         else:
             can_create = False
             can_approve = False
@@ -191,16 +193,15 @@ class Document(object):
             err = 'User is not authorised to create this resource'
             raise exceptions.Unauthorized(err)
 
-        # If user can approve resource, do it automatically on creation
-        if can_approve:
-            kwargs[cls.state_field] = State.approved.value
+        # If user can approve resource and has not specified a state, approve on creation
+        if cls.state_field not in kwargs and can_approve:
+            resource._resource.update({cls.state_field: State.approved.value})
 
-        can_set_state = yield cls.validate_state_transition(user, None, kwargs[cls.state_field], **kwargs)
+        can_set_state = yield resource.validate_state_transition(user, None, resource._state, **kwargs)
         if not can_set_state:
-            err = 'Cannot set initial state as {}'.format(kwargs[cls.state_field])
+            err = 'Cannot set initial state as {}'.format(resource._state)
             raise exceptions.ValidationError(err)
 
-        resource = cls(**kwargs)
         yield resource._save()
 
         raise Return(resource)
@@ -230,8 +231,10 @@ class Document(object):
 
     @coroutine
     def update(self, user, **kwargs):
-        # If resource is not an editable state, should not be able to update
-        if self.state not in EDITABLE_STATES:
+        fields_to_update = set(kwargs.keys()) & set(self._resource.keys())
+
+        # Should only be able to edit resource if in editable state or being changed to editable state
+        if self.state not in EDITABLE_STATES and kwargs.get(self.state_field) not in EDITABLE_STATES:
             err = '{} resource cannot be updated'.format(self.state)
             raise exceptions.Unauthorized(err)
 
@@ -253,7 +256,6 @@ class Document(object):
                 err = 'User is not authorised to update this resource'
                 raise exceptions.Unauthorized(err)
 
-        fields_to_update = set(kwargs.keys()) & set(self._resource.keys())
         errors = []
 
         read_only_fields = fields_to_update & self._read_only
@@ -261,10 +263,10 @@ class Document(object):
             msg = '{} may not be modified'
             errors += [msg.format(x) for x in read_only_fields]
 
-        state_field_update = fields_to_update & {self._state}
+        state_field_update = fields_to_update & {self.state_field}
         if state_field_update and \
                 not (yield self.validate_state_transition(user, self._state, kwargs[self.state_field], **kwargs)):
-            errors += ['Cannot transition from state {} to state {}'.format(self._state, kwargs[self.state_field])]
+            errors += ['Cannot transition from {} state to {} state'.format(self._state, kwargs[self.state_field])]
 
         if errors:
             raise exceptions.ValidationError(errors)
@@ -417,28 +419,25 @@ class SubResource(Document):
     def id(self, value):
         self._resource['id'] = value
 
+    @classmethod
     @coroutine
     def create(cls, user, **kwargs):
-        """If parent resource is not an editable state, should not be able to update."""
-        try:
-            parent = yield cls.parent_resource.get(cls.parent_id)
-        except couch.NotFound:
-            msg = '{}_id {} not found'.format(
-                cls.parent_resource.resource_type,
-                cls.parent_id)
-            raise exceptions.ValidationError(msg)
+        """If parent resource is not an editable state, should not be able to create."""
+        parent_id = kwargs.get(cls.parent_resource.resource_type + '_id')
+        parent = yield cls.parent_resource.get(parent_id)
 
-        if not parent._state not in EDITABLE_STATES:
-            err = '{} resource cannot be updated'.format(parent._state)
+        if parent._state not in EDITABLE_STATES:
+            err = 'Cannot create child of {} resource'.format(parent._state)
             raise exceptions.Unauthorized(err)
 
-        yield super(SubResource, cls).create(user, **kwargs)
+        resource = yield super(SubResource, cls).create(user, **kwargs)
+        raise Return(resource)
 
     @coroutine
     def update(self, user, **kwargs):
         """If parent resource is not an editable state, should not be able to update"""
-        if not self.parent._state not in EDITABLE_STATES:
-            err = '{} resource cannot be updated'.format(self.parent._state)
+        if self.parent._state not in EDITABLE_STATES:
+            err = 'Cannot update child of {} resource'.format(self.parent._state)
             raise exceptions.Unauthorized(err)
 
         yield super(SubResource, self).update(user, **kwargs)

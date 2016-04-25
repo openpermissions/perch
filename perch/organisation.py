@@ -418,8 +418,11 @@ class Service(SubResource):
         :param user: a User
         :param data: data that the user wants to update
         """
-        is_external = kwargs.get('service_type', self.service_type) == 'external'
-        is_org_admin = user.is_org_admin(self.organisation_id)
+        service_type = data.get('service_type', self.service_type)
+        organisation_id = data.get('organisation_id', self.organisation_id)
+
+        is_external = service_type == 'external'
+        is_org_admin = user.is_org_admin(organisation_id)
         raise Return(is_org_admin or is_external)
 
     @coroutine
