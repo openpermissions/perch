@@ -11,6 +11,7 @@ from __future__ import unicode_literals
 
 from copy import deepcopy
 from enum import Enum
+from operator import attrgetter
 
 import couch
 from tornado.gen import coroutine, Return
@@ -20,13 +21,19 @@ from voluptuous import MultipleInvalid, Schema, ALLOW_EXTRA
 from . import exceptions
 
 
-class State(Enum):
-    approved = 'approved'
-    pending = 'pending'
-    rejected = 'rejected'
-    default = pending
+__all__ = ['State', 'Document', 'SubResource']
 
-VALID_STATES = {state.value for state in State}
+
+class State(Enum):
+    """
+    Resource states, the enum values represent the priority of the state.
+
+    For example, rejected has higher priority than approved
+    """
+    approved = 0
+    pending = 1
+    rejected = 2
+    deactivated = 3
 
 
 def format_error(invalid, doc_type):
@@ -50,12 +57,14 @@ def format_error(invalid, doc_type):
 class Document(object):
     internal_fields = ['type', '_id', '_rev']
     _resource = {}
+    resource_type = None
     schema = Schema({
         '_id': unicode,
         '_rev': unicode
     }, extra=ALLOW_EXTRA)
     # read only fields can not be changed after the resource has been created
     read_only_fields = []
+    default_state = State.pending
 
     def __init__(self, **kwargs):
         self._resource = deepcopy(kwargs)
@@ -308,6 +317,16 @@ class Document(object):
         """Check if a user is authorized to delete a resource"""
         raise Return(True)
 
+    @property
+    def state(self):
+        """Get the Document's state"""
+        state = self._resource.get('state', self.default_state)
+
+        if state in State:
+            return state
+        else:
+            return getattr(State, state)
+
 
 class SubResource(Document):
     _parent = None
@@ -329,6 +348,19 @@ class SubResource(Document):
     @property
     def parent(self):
         return self._parent
+
+    @coroutine
+    def get_parent(self):
+        """
+        Get the parent resource from the database
+
+        The get, create & update methods will populate the parent for you. Use
+        this method in the cases where parent has not been populated.
+        """
+        if not self._parent:
+            self._parent = yield self.parent_resource.get(self.parent_id)
+
+        raise Return(self._parent)
 
     @property
     def id(self):
@@ -355,6 +387,19 @@ class SubResource(Document):
             raise exceptions.ValidationError(msg)
 
         yield self._parent.save_subresource(self)
+
+    @classmethod
+    @coroutine
+    def create(cls, user, **kwargs):
+        resource = yield super(SubResource, cls).create(user, **kwargs)
+        yield resource.get_parent()
+
+        raise Return(resource)
+
+    @coroutine
+    def update(self, user, **kwargs):
+        yield super(SubResource, self).update(user, **kwargs)
+        yield self.get_parent()
 
     @classmethod
     @coroutine
@@ -401,11 +446,32 @@ class SubResource(Document):
             raise exceptions.Unauthorized('User may not delete the resource')
 
         try:
-            self._parent = yield self.parent_resource.get(self.parent_id)
+            parent = yield self.get_parent()
         except couch.NotFound:
             msg = '{}_id {} not found'.format(
                 self.parent_resource.resource_type,
                 self.parent_id)
             raise exceptions.ValidationError(msg)
 
-        yield self._parent.delete_subresource(self)
+        yield parent.delete_subresource(self)
+
+    @property
+    def state(self):
+        """
+        Get the SubResource state
+
+        If the parents state has a higher priority, then it overrides the
+        SubResource state
+
+        ..note:: This assumes that self.parent is populated
+        """
+        state = self._resource.get('state', self.default_state)
+        if state not in State:
+            state = getattr(State, state)
+
+        if not self.parent:
+            raise Exception('Unable to check the parent state')
+
+        parent_state = self.parent.state
+
+        return max([state, parent_state], key=attrgetter('value'))

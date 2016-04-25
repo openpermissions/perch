@@ -176,7 +176,7 @@ def user_organisations_resource(doc):
             yield [doc['_id'], org_id], resource
 
 
-@view('registry', '1.0.0')
+@view('registry', '1.0.1')
 def joined_organisations(doc):
     """View for getting organisations associated with a user"""
     if doc.get('type') == 'user':
@@ -188,7 +188,7 @@ def joined_organisations(doc):
             yield [doc['_id'], None], org
 
             try:
-                yield [doc['_id'], state['join_state']], org
+                yield [doc['_id'], state['state']], org
             except KeyError:
                 pass
 

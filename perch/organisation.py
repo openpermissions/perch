@@ -22,7 +22,7 @@ from voluptuous import (All, Any, Extra, In, Invalid, Length, MultipleInvalid,
                         Range, Required, Schema, ALLOW_EXTRA)
 
 from . import views, exceptions, validators
-from .model import format_error, Document, SubResource, State, VALID_STATES
+from .model import format_error, Document, SubResource, State
 from .validators import MetaSchema, partial_schema
 
 
@@ -64,7 +64,7 @@ class Organisation(Document):
 
         schema = Schema({
             Required('name'): All(unicode, name_length),
-            Required('state', default=State.default.value): In(VALID_STATES),
+            Required('state', default=cls.default_state.name): validators.validate_state,
             Required('created_by'): unicode,
             Required('type', default=cls.resource_type): cls.resource_type,
             Required('star_rating', default=0): Range(0, 5),
@@ -102,7 +102,7 @@ class Organisation(Document):
     @coroutine
     def create(cls, user, **kwargs):
         if user.is_admin():
-            kwargs['state'] = State.approved.value
+            kwargs['state'] = State.approved.name
             organisation = yield super(Organisation, cls).create(user, **kwargs)
             # create default service
             service = yield Service.create(
@@ -141,7 +141,7 @@ class Organisation(Document):
         :returns: list of Organisation instances
         :raises: SocketError, CouchException
         """
-        if state and state not in VALID_STATES:
+        if state and state not in validators.VALID_STATES:
             raise exceptions.ValidationError('Invalid "state"')
         elif state:
             organisations = yield views.organisations.get(key=state,
@@ -153,20 +153,20 @@ class Organisation(Document):
 
     @classmethod
     @coroutine
-    def user_organisations(cls, user_id, join_state=None):
+    def user_organisations(cls, user_id, state=None):
         """
         Get organisations that the user has joined
 
         :param user_id: the user ID
-        :param join_state: the user's "join" state
+        :param state: the user's "join" state
         :returns: list of Organisation instances
         :raises: SocketError, CouchException
         """
-        if join_state and join_state not in VALID_STATES:
+        if state and state not in validators.VALID_STATES:
             raise exceptions.ValidationError('Invalid "state"')
 
         organisations = yield views.joined_organisations.get(
-            key=[user_id, join_state], include_docs=True)
+            key=[user_id, state], include_docs=True)
 
         raise Return([cls(**org['doc']) for org in organisations['rows']])
 
@@ -186,19 +186,18 @@ class Organisation(Document):
         :returns: bool, set of fields that the user was not authorized to update
         """
         if user.is_admin():
-            return True, set([])
+            raise Return((True, set([])))
 
-        org_admin = (self.state == State.approved.value and
-                     user.is_org_admin(self.id))
+        org_admin = self.state == State.approved and user.is_org_admin(self.id)
         creator = self.created_by == user.id
         if org_admin or creator:
             fields = {'star_rating', 'state'} & set(data.keys())
             if fields:
-                return False, fields
+                raise Return((False, fields))
             else:
-                return True, set([])
+                raise Return((True, set([])))
 
-        return False, set([])
+        raise Return((False, set([])))
 
     @coroutine
     def can_delete(self, user):
@@ -269,7 +268,7 @@ service_name_length = Length(min=options.min_length_service_name,
 
 def validate_service_schema(v):
     if v['service_type'] == 'external':
-        v['state'] = State.approved.value
+        v['state'] = State.approved.name
     else:
         if 'location' not in v:
             raise Invalid('location is required')
@@ -297,7 +296,7 @@ class Service(SubResource):
         Required('type', default=resource_type): resource_type,
         Required('created_by'): unicode,
         Required('service_type'): In(SERVICE_TYPES),
-        Required('state', default=State.pending.value): In(VALID_STATES),
+        Required('state', default=SubResource.default_state.name): validators.validate_state,
         'location': validators.validate_url
     }, validate_service_schema)
 
@@ -360,13 +359,13 @@ class Service(SubResource):
         is_external = kwargs.get('service_type') == 'external'
         is_org_admin = user.is_org_admin(kwargs.get('organisation_id'))
         if is_org_admin or is_external:
-            kwargs['state'] = State.approved.value
+            kwargs['state'] = State.approved.name
         else:
-            kwargs['state'] = State.pending.value
+            kwargs['state'] = State.pending.name
 
         resource = yield super(Service, cls).create(user, **kwargs)
 
-        if resource.state == State.approved.value:
+        if resource.state == State.approved:
             yield OAuthSecret.create(user, client_id=resource.id)
 
         raise Return(resource)
@@ -381,8 +380,8 @@ class Service(SubResource):
         previous_state = self.state
         yield super(Service, self).update(user, **kwargs)
 
-        approved = self.state == State.approved.value
-        was_pending = previous_state == State.pending.value
+        approved = self.state == State.approved
+        was_pending = previous_state == State.pending
         if approved and was_pending:
             secrets = yield OAuthSecret.view.get(key=self.id)
             if not secrets['rows']:
@@ -464,7 +463,7 @@ class Repository(SubResource):
         Required('name'): All(unicode, _repository_name_length),
         Required('service_id'): unicode,
         Required('organisation_id'): unicode,
-        Required('state', default=State.pending.value): In(VALID_STATES),
+        Required('state', default=SubResource.default_state.name): validators.validate_state,
         Required('type', default=resource_type): resource_type,
         Required('created_by'): unicode,
         Required('permissions'): [Any(
@@ -528,7 +527,7 @@ class Repository(SubResource):
             raise exceptions.ValidationError('{} is not a repository service'
                                              .format(self.service_id))
 
-        if service.state != State.approved.value:
+        if service.state != State.approved:
             raise exceptions.ValidationError('{} is not an approved service'
                                              .format(self.service_id))
 
@@ -551,7 +550,7 @@ class Repository(SubResource):
                 service = yield Service.get(service_id)
                 if not (service.organisation_id == self.organisation_id or
                         user.is_org_admin(service.organisation_id)):
-                    kwargs['state'] = State.pending.value
+                    kwargs['state'] = State.pending.name
             except couch.NotFound:
                 pass
 
@@ -580,7 +579,7 @@ class Repository(SubResource):
 
             if 'state' in kwargs:
                 updating_service = ('service_id' in kwargs
-                                    and kwargs['state'] == State.pending.value)
+                                    and kwargs['state'] == State.pending.name)
                 if not updating_service:
                     fields.add('state')
 
@@ -592,7 +591,7 @@ class Repository(SubResource):
         try:
             service = yield Service.get(self.service_id)
 
-            if service.state != State.approved.value:
+            if service.state != State.approved:
                 raise Return((False, {'service_id'}))
 
             if user.is_org_admin(service.organisation_id):
@@ -613,7 +612,7 @@ class Repository(SubResource):
             try:
                 service = yield Service.get(service_id)
                 if user.is_org_admin(service.organisation_id):
-                    kwargs['state'] = State.approved.value
+                    kwargs['state'] = State.approved.name
             except couch.NotFound:
                 # handled later
                 pass
@@ -633,7 +632,7 @@ class Repository(SubResource):
 
         Must be admin or org admin to delete
         """
-        if self.state == State.approved.value:
+        if self.state == State.approved:
             raise Return(False)
 
         can_delete, _ = yield self.can_update(user)
@@ -648,16 +647,14 @@ class Repository(SubResource):
         """
         repository = self.clean(user=user)
         try:
-            repository['organisation'] = self.parent.clean()
-        except AttributeError:
-            try:
-                self._parent = yield self.parent_resource.get(self.parent_id)
-                repository['organisation'] = self.parent.clean()
-            except couch.NotFound:
-                repository['organisation'] = {'id': self.parent_id}
+            parent = yield self.get_parent()
+            repository['organisation'] = parent.clean()
+        except couch.NotFound:
+            parent = None
+            repository['organisation'] = {'id': self.parent_id}
 
         service_id = self.service_id
-        organisation_services = getattr(self.parent, Service.parent_key, {})
+        organisation_services = getattr(parent, Service.parent_key, {})
         if service_id in organisation_services:
             repository['service'] = organisation_services[service_id]
         else:
@@ -705,7 +702,7 @@ class OAuthSecret(Document):
         service = yield Service.get(kwargs['client_id'])
         creator = service.created_by == user.id
         can_create = user.is_org_admin(service.organisation_id) or creator
-        approved = service.state == State.approved.value
+        approved = service.state == State.approved
 
         raise Return(can_create and approved)
 

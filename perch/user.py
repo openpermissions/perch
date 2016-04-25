@@ -20,8 +20,7 @@ from tornado.options import options, define
 from voluptuous import All, Extra, In, Length, Required, Schema
 
 from . import views, exceptions, validators
-from .model import Document, SubResource, State, VALID_STATES
-from .organisation import Organisation
+from .model import Document, SubResource, State
 
 
 __all__ = ['User', 'UserOrganisation', 'Token']
@@ -50,13 +49,13 @@ class User(Document):
     def schema(cls, doc):
         default_global = {
             GLOBAL: {
-                'join_state': State.approved.value,
+                'state': State.approved.name,
                 'role': cls.roles.default.value
             }
         }
         orgs_schema = Schema({
             Extra: {
-                'join_state': In(VALID_STATES),
+                'state': validators.validate_state,
                 'role': In([x.value for x in cls.roles])
             }
         }, required=True)
@@ -215,11 +214,11 @@ class User(Document):
         try:
             org = self.organisations.get(organisation_id, {})
             user_role = org.get('role')
-            state = org.get('join_state')
+            state = org.get('state')
         except AttributeError:
             return False
 
-        return user_role == role.value and state == State.approved.value
+        return user_role == role.value and state == State.approved.name
 
     @coroutine
     def can_delete(self, user):
@@ -288,7 +287,7 @@ class UserOrganisation(SubResource):
     schema = Schema({
         'id': unicode,
         'user_id': unicode,
-        Required('join_state', default=State.default.value): In(VALID_STATES),
+        Required('state', default=SubResource.default_state.name): validators.validate_state,
         Required('role', default=User.roles.default.value): In([x.value for x in User.roles])
     }, )
 
@@ -299,23 +298,15 @@ class UserOrganisation(SubResource):
     @classmethod
     @coroutine
     def can_create(cls, user, **kwargs):
-        if 'join_state' in kwargs:
-            if not user.is_admin() and kwargs['join_state'] != State.default.value:
+        if 'state' in kwargs:
+            if not user.is_admin() and kwargs['state'] != cls.default_state.name:
                 raise Return(False)
 
         raise Return(True)
 
     @coroutine
     def can_update(self, user, **kwargs):
-        if not user.is_org_admin(self.organisation_id):
-            raise Return((False, []))
-
-        if 'role' in kwargs and self.join_state != State.approved.value:
-            raise exceptions.ValidationError(
-                'User is not an approved member of {}'
-                .format(self.organisation_id))
-
-        raise Return((True, []))
+        raise Return((user.is_org_admin(self.organisation_id), []))
 
     @coroutine
     def can_delete(self, user, **kwargs):
