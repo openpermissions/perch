@@ -100,6 +100,7 @@ class Organisation(Document):
         return schema(doc)
 
     @classmethod
+    @coroutine
     def _create_default_service(cls, user, organisation):
         service = yield Service.create(
             user,
@@ -120,7 +121,7 @@ class Organisation(Document):
 
         # If organisation is approved on creation, create default service
         if organisation.state == State.approved.value:
-            cls._create_default_service(user, organisation)
+            yield cls._create_default_service(user, organisation)
 
         raise Return(organisation)
 
@@ -186,7 +187,7 @@ class Organisation(Document):
         approved = self.state == State.approved.value
         state_changed = previous_state != self.state
         if approved and state_changed:
-            self._create_default_service(user, self)
+            yield self._create_default_service(user, self)
 
     @coroutine
     def can_update(self, user, **data):
@@ -466,14 +467,6 @@ class Service(SubResource):
         :param resource: a Resource or SubResource with "permissions" attribute
         :returns: True if has access, False otherwise
         """
-        # If service is not approved do not authorize
-        if not (self.state == State.approved.value and self.parent.state == State.approved.value):
-            return False
-
-        # If resource is not approved do not authorize
-        if not (resource.state == State.approved.value and resource.parent.state == State.approved.value):
-            return False
-
         permissions = group_permissions(getattr(resource, 'permissions', []))
 
         org_permissions = permissions['organisation_id'][self.organisation_id]
