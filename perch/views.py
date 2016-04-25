@@ -231,7 +231,7 @@ def organisation_name(doc):
         yield doc.get('name'), doc['_id']
 
 
-@view('registry', '1.0.0')
+@view('registry', '1.0.1')
 def reference_links(doc):
     """Get reference links"""
     if doc.get('type') == 'organisation' and doc.get('state') != 'deactivated':
@@ -367,7 +367,7 @@ def repository_name(doc):
             yield name, repository_id
 
 
-@view('registry', '1.0.0')
+@view('registry', '1.0.1')
 def service_and_repository(doc):
     """
     View for looking up services and repositories by their ID
