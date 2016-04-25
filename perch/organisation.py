@@ -257,9 +257,8 @@ def group_permissions(permissions):
         if p['permission'] == 'rw':
             permission_set.update({'r', 'w'})
 
-    if 'all' in groups:
-        # the 'all' permission type always has None as the value
-        groups['all'] = groups['all'][None]
+    # the 'all' permission type always has None as the value
+    groups['all'] = groups['all'][None]
 
     return groups
 
@@ -443,7 +442,7 @@ class Service(SubResource):
         for permission_set in [org_permissions, type_permissions, all_permissions]:
             if '-' in permission_set:
                 return False
-            elif requested_access in permission_set:
+            elif set([x for x in requested_access]).issubset(permission_set):
                 return True
 
         return False
