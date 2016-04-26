@@ -20,7 +20,7 @@ from tornado.options import options, define
 from voluptuous import All, Extra, In, Length, Required, Schema
 
 from . import views, exceptions, validators
-from .model import Document, SubResource, State, VALID_STATES
+from .model import Document, SubResource, State
 
 
 __all__ = ['User', 'UserOrganisation', 'Token']
@@ -49,13 +49,13 @@ class User(Document):
     def schema(cls, doc):
         default_global = {
             GLOBAL: {
-                'join_state': State.approved.value,
+                'state': State.approved.name,
                 'role': cls.roles.default.value
             }
         }
         orgs_schema = Schema({
             Extra: {
-                'join_state': In(VALID_STATES),
+                'state': validators.validate_state,
                 'role': In([x.value for x in cls.roles])
             }
         }, required=True)
@@ -214,11 +214,11 @@ class User(Document):
         try:
             org = self.organisations.get(organisation_id, {})
             user_role = org.get('role')
-            state = org.get('join_state')
+            state = org.get('state')
         except AttributeError:
             return False
 
-        return user_role == role.value and state == State.approved.value
+        return user_role == role.value and state == State.approved.name
 
     @classmethod
     @coroutine
@@ -278,12 +278,11 @@ class UserOrganisation(SubResource):
     parent_key = 'organisations'
     view = views.user_organisations_resource
     internal_fields = ['id', 'user_id']
-    state_field = 'join_state'
 
     schema = Schema({
         'id': unicode,
         'user_id': unicode,
-        Required('join_state', default=State.default.value): In(VALID_STATES),
+        Required('state', default=SubResource.default_state.name): validators.validate_state,
         Required('role', default=User.roles.default.value): In([x.value for x in User.roles])
     }, )
 
@@ -310,10 +309,5 @@ class UserOrganisation(SubResource):
         if 'role' in kwargs:
             if not user.is_org_admin(self.organisation_id):
                 raise Return((False, {'role'}))
-
-            if self.join_state != State.approved.value:
-                raise exceptions.ValidationError(
-                    'User is not an approved member of {}'
-                    .format(self.organisation_id))
 
         raise Return((True, []))

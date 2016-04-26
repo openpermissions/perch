@@ -22,7 +22,7 @@ from voluptuous import (All, Any, Extra, In, Invalid, Length, MultipleInvalid,
                         Range, Required, Schema, ALLOW_EXTRA)
 
 from . import views, exceptions, validators
-from .model import format_error, Document, SubResource, State, VALID_STATES
+from .model import format_error, Document, SubResource, State
 from .validators import MetaSchema, partial_schema
 
 
@@ -54,7 +54,6 @@ class Organisation(Document):
     db_name = 'registry'
     internal_fields = Document.internal_fields + ['services', 'repositories']
     read_only_fields = ['created_by']
-    state_field = 'state'
 
     @classmethod
     def schema(cls, doc):
@@ -65,7 +64,7 @@ class Organisation(Document):
 
         schema = Schema({
             Required('name'): All(unicode, name_length),
-            Required('state', default=State.default.value): In(VALID_STATES),
+            Required('state', default=cls.default_state.name): validators.validate_state,
             Required('created_by'): unicode,
             Required('type', default=cls.resource_type): cls.resource_type,
             Required('star_rating', default=0): Range(0, 5),
@@ -99,17 +98,16 @@ class Organisation(Document):
 
         return schema(doc)
 
-    @classmethod
     @coroutine
-    def _create_default_service(cls, user, organisation):
+    def create_default_service(self, user):
         service = yield Service.create(
             user,
             created_by=user.id,
             name=unicode(uuid.uuid4().hex),
             service_type='external',
-            organisation_id=organisation.id
+            organisation_id=self.id
         )
-        organisation.services[service.id] = service._resource
+        self.services[service.id] = service._resource
 
     @classmethod
     @coroutine
@@ -120,8 +118,8 @@ class Organisation(Document):
         organisation = yield super(Organisation, cls).create(user, **kwargs)
 
         # If organisation is approved on creation, create default service
-        if organisation.state == State.approved.value:
-            yield cls._create_default_service(user, organisation)
+        if organisation.state == State.approved:
+            yield organisation.create_default_service(user)
 
         raise Return(organisation)
 
@@ -147,7 +145,7 @@ class Organisation(Document):
         :returns: list of Organisation instances
         :raises: SocketError, CouchException
         """
-        if state and state not in VALID_STATES:
+        if state and state not in validators.VALID_STATES:
             raise exceptions.ValidationError('Invalid "state"')
         elif state:
             organisations = yield views.organisations.get(key=state,
@@ -161,20 +159,20 @@ class Organisation(Document):
 
     @classmethod
     @coroutine
-    def user_organisations(cls, user_id, join_state=None):
+    def user_organisations(cls, user_id, state=None):
         """
         Get organisations that the user has joined
 
         :param user_id: the user ID
-        :param join_state: the user's "join" state
+        :param state: the user's "join" state
         :returns: list of Organisation instances
         :raises: SocketError, CouchException
         """
-        if join_state and join_state not in VALID_STATES:
+        if state and state not in validators.VALID_STATES:
             raise exceptions.ValidationError('Invalid "state"')
 
         organisations = yield views.joined_organisations.get(
-            key=[user_id, join_state], include_docs=True)
+            key=[user_id, state], include_docs=True)
 
         raise Return([cls(**org['doc']) for org in organisations['rows']])
 
@@ -184,10 +182,10 @@ class Organisation(Document):
 
         yield super(Organisation, self).update(user, **kwargs)
 
-        approved = self.state == State.approved.value
-        state_changed = previous_state != self.state
-        if approved and state_changed:
-            yield self._create_default_service(user, self)
+        approved = self.state == State.approved
+        was_pending = previous_state == State.pending
+        if approved and was_pending:
+            yield self.create_default_service(user)
 
     @coroutine
     def can_update(self, user, **data):
@@ -301,7 +299,6 @@ class Service(SubResource):
     parent_key = 'services'
     read_only_fields = ['created_by']
     view = views.services
-    state_field = 'state'
 
     default_permission = [{'type': 'all', 'value': None, 'permission': 'rw'}]
     schema = MetaSchema({
@@ -316,7 +313,7 @@ class Service(SubResource):
         Required('type', default=resource_type): resource_type,
         Required('created_by'): unicode,
         Required('service_type'): In(SERVICE_TYPES),
-        Required('state', default=State.default.value): In(VALID_STATES),
+        Required('state', default=SubResource.default_state.name): validators.validate_state,
         'location': validators.validate_url
     }, validate_service_schema)
 
@@ -390,7 +387,7 @@ class Service(SubResource):
         resource = yield super(Service, cls).create(user, **kwargs)
 
         # If service is approved on creation, create secret for service
-        if resource.state == State.approved.value:
+        if resource.state == State.approved:
             yield OAuthSecret.create(user, client_id=resource.id)
 
         raise Return(resource)
@@ -405,9 +402,9 @@ class Service(SubResource):
         previous_state = self.state
         yield super(Service, self).update(user, **kwargs)
 
-        approved = self.state == State.approved.value
-        state_changed = previous_state != self.state
-        if approved and state_changed:
+        approved = self.state == State.approved
+        was_pending = previous_state == State.pending
+        if approved and was_pending:
             secrets = yield OAuthSecret.view.get(key=self.id)
             if not secrets['rows']:
                 yield OAuthSecret.create(user, client_id=self.id)
@@ -488,7 +485,6 @@ class Repository(SubResource):
     parent_key = 'repositories'
     read_only_fields = ['created_by']
     view = views.repositories
-    state_field = 'state'
 
     _repository_name_length = Length(min=options.min_length_repository_name,
                                      max=options.max_length_repository_name)
@@ -498,7 +494,7 @@ class Repository(SubResource):
         Required('name'): All(unicode, _repository_name_length),
         Required('service_id'): unicode,
         Required('organisation_id'): unicode,
-        Required('state', default=State.default.value): In(VALID_STATES),
+        Required('state', default=SubResource.default_state.name): validators.validate_state,
         Required('type', default=resource_type): resource_type,
         Required('created_by'): unicode,
         Required('permissions'): [Any(
@@ -562,7 +558,7 @@ class Repository(SubResource):
             raise exceptions.ValidationError('{} is not a repository service'
                                              .format(self.service_id))
 
-        if service.state != State.approved.value:
+        if service.state != State.approved:
             raise exceptions.ValidationError('{} is not an approved service'
                                              .format(self.service_id))
 
@@ -601,7 +597,7 @@ class Repository(SubResource):
         if service_id:
             can_approve = yield self.can_approve(user, **kwargs)
             if not can_approve:
-                kwargs['state'] = State.pending.value
+                kwargs['state'] = State.pending.name
 
         yield super(Repository, self).update(user, **kwargs)
 
@@ -676,16 +672,14 @@ class Repository(SubResource):
         """
         repository = self.clean(user=user)
         try:
-            repository['organisation'] = self.parent.clean()
-        except AttributeError:
-            try:
-                self._parent = yield self.parent_resource.get(self.parent_id)
-                repository['organisation'] = self.parent.clean()
-            except couch.NotFound:
-                repository['organisation'] = {'id': self.parent_id}
+            parent = yield self.get_parent()
+            repository['organisation'] = parent.clean()
+        except couch.NotFound:
+            parent = None
+            repository['organisation'] = {'id': self.parent_id}
 
         service_id = self.service_id
-        organisation_services = getattr(self.parent, Service.parent_key, {})
+        organisation_services = getattr(parent, Service.parent_key, {})
         if service_id in organisation_services:
             repository['service'] = organisation_services[service_id]
         else:
@@ -733,7 +727,7 @@ class OAuthSecret(Document):
         service = yield Service.get(kwargs['client_id'])
         creator = service.created_by == user.id
         can_create = user.is_org_admin(service.organisation_id) or creator
-        approved = service.state == State.approved.value
+        approved = service.state == State.approved
 
         raise Return(can_create and approved)
 

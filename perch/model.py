@@ -11,6 +11,7 @@ from __future__ import unicode_literals
 
 from copy import deepcopy
 from enum import Enum
+from operator import attrgetter
 
 import couch
 from tornado.gen import coroutine, Return
@@ -20,28 +21,34 @@ from voluptuous import MultipleInvalid, Schema, ALLOW_EXTRA
 from . import exceptions
 
 
-class State(Enum):
-    approved = 'approved'
-    pending = 'pending'
-    rejected = 'rejected'
-    deactivated = 'deactivated'
-    default = pending
+__all__ = ['State', 'Document', 'SubResource']
 
-VALID_STATES = {state.value for state in State}
-EDITABLE_STATES = [State.approved.value, State.pending.value]
+
+class State(Enum):
+    """
+    Resource states, the enum values represent the priority of the state.
+
+    For example, rejected has higher priority than approved
+    """
+    approved = 0
+    pending = 1
+    rejected = 2
+    deactivated = 3
+
+EDITABLE_STATES = [State.approved, State.pending]
 
 APPROVAL_STATE_TRANSITIONS = {
-    None: [State.approved.value],
-    State.pending.value: [State.approved.value, State.rejected.value],
-    State.deactivated.value: [State.approved.value],
+    None: [State.approved],
+    State.pending: [State.approved, State.rejected],
+    State.deactivated: [State.approved],
 }
 
 STATE_TRANSITIONS = {
-    None: [State.pending.value],
-    State.pending.value: [State.deactivated.value],
-    State.approved.value: [State.pending.value, State.deactivated.value],
-    State.rejected.value: [State.pending.value, State.deactivated.value],
-    State.deactivated.value: [State.pending.value]
+    None: [State.pending],
+    State.pending: [State.deactivated],
+    State.approved: [State.pending, State.deactivated],
+    State.rejected: [State.pending, State.deactivated],
+    State.deactivated: [State.pending]
 }
 
 
@@ -66,14 +73,14 @@ def format_error(invalid, doc_type):
 class Document(object):
     internal_fields = ['type', '_id', '_rev']
     _resource = {}
+    resource_type = None
     schema = Schema({
         '_id': unicode,
         '_rev': unicode
     }, extra=ALLOW_EXTRA)
     # read only fields can not be changed after the resource has been created
     read_only_fields = []
-    # state field indicates the field used to control approval state of resource
-    state_field = None
+    default_state = State.pending
 
     def __init__(self, **kwargs):
         self._resource = deepcopy(kwargs)
@@ -109,10 +116,6 @@ class Document(object):
     @property
     def _read_only(self):
         return set(self.read_only_fields) | {'_id', '_rev', 'type'}
-
-    @property
-    def _state(self):
-        return self._resource.get(self.state_field)
 
     @property
     def id(self):
@@ -194,12 +197,12 @@ class Document(object):
             raise exceptions.Unauthorized(err)
 
         # If user can approve resource and has not specified a state, approve on creation
-        if cls.state_field not in kwargs and can_approve:
-            resource._resource.update({cls.state_field: State.approved.value})
+        if 'state' not in kwargs and can_approve:
+            resource._resource.update({'state': State.approved.name})
 
-        can_set_state = yield resource.validate_state_transition(user, None, resource._state, **kwargs)
+        can_set_state = yield resource.validate_state_transition(user, None, resource.state, **kwargs)
         if not can_set_state:
-            err = 'Cannot set initial state as {}'.format(resource._state)
+            err = 'Cannot set initial state as {}'.format(resource.state.name)
             raise exceptions.ValidationError(err)
 
         yield resource._save()
@@ -234,8 +237,10 @@ class Document(object):
         fields_to_update = set(kwargs.keys()) & set(self._resource.keys())
 
         # Should only be able to edit resource if in editable state or being changed to editable state
-        if self.state not in EDITABLE_STATES and kwargs.get(self.state_field) not in EDITABLE_STATES:
-            err = '{} resource cannot be updated'.format(self.state)
+        current_state_editable = self.state in EDITABLE_STATES
+        new_state_editable = 'state' in kwargs and getattr(State, kwargs['state']) in EDITABLE_STATES
+        if not current_state_editable and not new_state_editable:
+            err = '{} resource cannot be updated'.format(self.state.name)
             raise exceptions.Unauthorized(err)
 
         if user:
@@ -263,10 +268,10 @@ class Document(object):
             msg = '{} may not be modified'
             errors += [msg.format(x) for x in read_only_fields]
 
-        state_field_update = fields_to_update & {self.state_field}
+        state_field_update = fields_to_update & {'state'}
         if state_field_update and \
-                not (yield self.validate_state_transition(user, self._state, kwargs[self.state_field], **kwargs)):
-            errors += ['Cannot transition from {} state to {} state'.format(self._state, kwargs[self.state_field])]
+                not (yield self.validate_state_transition(user, self.state, getattr(State, kwargs['state']), **kwargs)):
+            errors += ['Cannot transition from {} state to {} state'.format(self.state.name, kwargs['state'])]
 
         if errors:
             raise exceptions.ValidationError(errors)
@@ -386,6 +391,16 @@ class Document(object):
         """Check if a user is authorized to delete a resource"""
         raise Return(False)
 
+    @property
+    def state(self):
+        """Get the Document's state"""
+        state = self._resource.get('state', self.default_state)
+
+        if state in State:
+            return state
+        else:
+            return getattr(State, state)
+
 
 class SubResource(Document):
     _parent = None
@@ -408,6 +423,19 @@ class SubResource(Document):
     def parent(self):
         return self._parent
 
+    @coroutine
+    def get_parent(self):
+        """
+        Get the parent resource from the database
+
+        The get, create & update methods will populate the parent for you. Use
+        this method in the cases where parent has not been populated.
+        """
+        if not self._parent:
+            self._parent = yield self.parent_resource.get(self.parent_id)
+
+        raise Return(self._parent)
+
     @property
     def id(self):
         try:
@@ -426,18 +454,22 @@ class SubResource(Document):
         parent_id = kwargs.get(cls.parent_resource.resource_type + '_id')
         parent = yield cls.parent_resource.get(parent_id)
 
-        if parent._state not in EDITABLE_STATES:
-            err = 'Cannot create child of {} resource'.format(parent._state)
+        if parent.state not in EDITABLE_STATES:
+            err = 'Cannot create child of {} resource'.format(parent.state.name)
             raise exceptions.Unauthorized(err)
 
         resource = yield super(SubResource, cls).create(user, **kwargs)
+        yield resource.get_parent()
+
         raise Return(resource)
 
     @coroutine
     def update(self, user, **kwargs):
         """If parent resource is not an editable state, should not be able to update"""
-        if self.parent._state not in EDITABLE_STATES:
-            err = 'Cannot update child of {} resource'.format(self.parent._state)
+        yield self.get_parent()
+
+        if self.parent.state not in EDITABLE_STATES:
+            err = 'Cannot update child of {} resource'.format(self.parent.state)
             raise exceptions.Unauthorized(err)
 
         yield super(SubResource, self).update(user, **kwargs)
@@ -502,11 +534,32 @@ class SubResource(Document):
             raise exceptions.Unauthorized('User may not delete the resource')
 
         try:
-            self._parent = yield self.parent_resource.get(self.parent_id)
+            parent = yield self.get_parent()
         except couch.NotFound:
             msg = '{}_id {} not found'.format(
                 self.parent_resource.resource_type,
                 self.parent_id)
             raise exceptions.ValidationError(msg)
 
-        yield self._parent.delete_subresource(self)
+        yield parent.delete_subresource(self)
+
+    @property
+    def state(self):
+        """
+        Get the SubResource state
+
+        If the parents state has a higher priority, then it overrides the
+        SubResource state
+
+        ..note:: This assumes that self.parent is populated
+        """
+        state = self._resource.get('state', self.default_state)
+        if state not in State:
+            state = getattr(State, state)
+
+        if not self.parent:
+            raise Exception('Unable to check the parent state')
+
+        parent_state = self.parent.state
+
+        return max([state, parent_state], key=attrgetter('value'))
