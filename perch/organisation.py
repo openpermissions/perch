@@ -303,7 +303,6 @@ class Service(SubResource):
     parent_key = 'services'
     read_only_fields = ['created_by']
     view = views.services
-    active_view = views.active_services
 
     default_permission = [{'type': 'all', 'value': None, 'permission': 'rw'}]
     schema = MetaSchema({
@@ -494,6 +493,19 @@ class Repository(SubResource):
     read_only_fields = ['created_by']
     view = views.repositories
     active_view = views.active_repositories
+
+    approval_state_transitions = {
+        None: [State.approved.name],
+        State.pending.name: [State.approved.name, State.rejected.name]
+    }
+
+    state_transitions = {
+        None: [State.pending.name],
+        State.pending.name: [State.deactivated.name],
+        State.approved.name: [State.pending.name],
+        State.rejected.name: [State.deactivated.name],
+        State.deactivated.name: [State.pending.name]
+    }
 
     _repository_name_length = Length(min=options.min_length_repository_name,
                                      max=options.max_length_repository_name)

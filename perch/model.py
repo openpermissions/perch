@@ -69,17 +69,17 @@ class Document(object):
     editable_states = [State.approved, State.pending]
 
     approval_state_transitions = {
-        None: [State.approved],
-        State.pending: [State.approved, State.rejected],
-        State.deactivated: [State.approved],
+        None: [State.approved.name],
+        State.pending.name: [State.approved.name, State.rejected.name],
+        State.deactivated.name: [State.approved.name],
     }
 
     state_transitions = {
-        None: [State.pending],
-        State.pending: [State.deactivated],
-        State.approved: [State.pending, State.deactivated],
-        State.rejected: [State.pending, State.deactivated],
-        State.deactivated: [State.pending]
+        None: [State.pending.name],
+        State.pending.name: [State.deactivated.name],
+        State.approved.name: [State.deactivated.name],
+        State.rejected.name: [State.deactivated.name],
+        State.deactivated.name: [State.pending.name]
     }
 
     def __init__(self, **kwargs):
@@ -209,7 +209,7 @@ class Document(object):
         if 'state' not in kwargs and can_approve:
             resource._resource.update({'state': State.approved.name})
 
-        can_set_state = yield resource.validate_state_transition(user, None, resource.state, **kwargs)
+        can_set_state = yield resource.validate_state_transition(user, None, resource._resource.get('state'), **kwargs)
         if not can_set_state:
             err = 'Cannot set initial state as {}'.format(resource.state.name)
             raise exceptions.ValidationError(err)
@@ -230,13 +230,14 @@ class Document(object):
         if start_state == end_state:
             raise Return(True)
 
-        allowed_transitions = self.state_transitions.get(start_state, [])
+        transitions = self.state_transitions.get(start_state, [])
 
+        approved_transitions = []
         can_approve = yield self.can_approve(user, **kwargs)
         if can_approve:
-            allowed_transitions += self.approval_state_transitions.get(start_state, [])
+            approved_transitions = self.approval_state_transitions.get(start_state, [])
 
-        if end_state not in allowed_transitions:
+        if end_state not in transitions and end_state not in approved_transitions:
             raise Return(False)
 
         raise Return(True)
@@ -247,7 +248,7 @@ class Document(object):
 
         # Should only be able to edit resource if in editable state or being changed to editable state
         current_state_editable = self.state in self.editable_states
-        new_state_editable = 'state' in kwargs and getattr(State, kwargs['state']) in self.editable_states
+        new_state_editable = 'state' in kwargs and getattr(State, kwargs['state'], None) in self.editable_states
         if not current_state_editable and not new_state_editable:
             err = '{} resource cannot be updated'.format(self.state.name)
             raise exceptions.Unauthorized(err)
@@ -279,7 +280,7 @@ class Document(object):
 
         state_field_update = fields_to_update & {'state'}
         if state_field_update and \
-                not (yield self.validate_state_transition(user, self.state, getattr(State, kwargs['state']), **kwargs)):
+                not (yield self.validate_state_transition(user, self._resource.get('state'), kwargs['state'], **kwargs)):
             errors += ['Cannot transition from {} state to {} state'.format(self.state.name, kwargs['state'])]
 
         if errors:

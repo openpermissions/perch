@@ -44,13 +44,13 @@ class User(Document):
     editable_states = [State.approved]
 
     approval_state_transitions = {
-        State.pending: [State.approved]
+        State.pending.name: [State.approved.name]
     }
 
     state_transitions = {
-        None: [State.pending],
-        State.pending: [State.deactivated],
-        State.approved: [State.deactivated]
+        None: [State.pending.name],
+        State.pending.name: [State.deactivated.name],
+        State.approved.name: [State.deactivated.name]
     }
 
     class roles(Enum):
@@ -68,7 +68,7 @@ class User(Document):
         }
         orgs_schema = Schema({
             Extra: {
-                'state': validators.validate_user_state,
+                'state': validators.validate_state,
                 'role': In([x.value for x in cls.roles])
             }
         }, required=True)
