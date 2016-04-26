@@ -399,7 +399,7 @@ def repository_name(doc):
             yield name, repository_id
 
 
-@view('registry', '1.0.1')
+@view('registry', '1.0.2')
 def service_and_repository(doc):
     """
     View for looking up services and repositories by their ID
@@ -417,6 +417,6 @@ def service_and_repository(doc):
         for service_id, service in doc.get('services', {}).items():
             if service.get('state') != 'deactivated':
                 service['id'] = service_id
-                service['organisation_id'] = service['id']
+                service['organisation_id'] = doc['_id']
 
                 yield service_id, service
