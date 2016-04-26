@@ -256,9 +256,8 @@ def group_permissions(permissions):
         if p['permission'] == 'rw':
             permission_set.update({'r', 'w'})
 
-    if 'all' in groups:
-        # the 'all' permission type always has None as the value
-        groups['all'] = groups['all'][None]
+    # the 'all' permission type always has None as the value
+    groups['all'] = groups['all'][None]
 
     return groups
 
@@ -433,6 +432,9 @@ class Service(SubResource):
         :param resource: a Resource or SubResource with "permissions" attribute
         :returns: True if has access, False otherwise
         """
+        if {self.state, resource.state} != {State.approved}:
+            return False
+
         permissions = group_permissions(getattr(resource, 'permissions', []))
 
         org_permissions = permissions['organisation_id'][self.organisation_id]
@@ -442,7 +444,7 @@ class Service(SubResource):
         for permission_set in [org_permissions, type_permissions, all_permissions]:
             if '-' in permission_set:
                 return False
-            elif requested_access in permission_set:
+            elif set([x for x in requested_access]).issubset(permission_set):
                 return True
 
         return False
