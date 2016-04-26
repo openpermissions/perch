@@ -410,6 +410,9 @@ class Document(object):
         else:
             return getattr(State, state)
 
+    @state.setter
+    def state(self, value):
+        self._resource['state'] = value
 
 class SubResource(Document):
     _parent = None
