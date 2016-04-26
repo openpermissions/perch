@@ -13,6 +13,8 @@ from urlparse import urlsplit
 
 from voluptuous import AllInvalid, Invalid, Schema, ALLOW_EXTRA
 
+from .model import State
+
 
 class MetaSchema(object):
     """
@@ -95,3 +97,16 @@ def validate_url(url):
         raise Invalid('Invalid URL')
 
     return url
+
+
+VALID_STATES = {x.name for x in State}
+
+
+def validate_state(state):
+    """Validate a state string"""
+    if state in State:
+        return state.name
+    elif state in VALID_STATES:
+        return state
+    else:
+        raise Invalid('Invalid state')
