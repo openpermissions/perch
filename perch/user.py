@@ -315,12 +315,14 @@ class UserOrganisation(SubResource):
 
     @coroutine
     def can_update(self, user, **kwargs):
+        update, fields = yield super(UserOrganisation, self).can_update(user, **kwargs)
+
         # Can only update if org admin or user being updated
         if not (user.id == self.id or user.is_org_admin(self.organisation_id)):
             raise Return((False, []))
 
         if 'role' in kwargs:
             if not user.is_org_admin(self.organisation_id):
-                raise Return((False, {'role'}))
+                raise Return((False, fields | {'role'}))
 
-        raise Return((True, []))
+        raise Return((update, fields))

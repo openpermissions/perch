@@ -211,8 +211,11 @@ class Document(object):
 
         can_set_state = yield resource.validate_state_transition(user, None, resource._resource.get('state'), **kwargs)
         if not can_set_state:
-            err = 'Cannot set initial state as {}'.format(resource.state.name)
-            raise exceptions.ValidationError(err)
+            err = [{
+                'field': 'state',
+                'message': 'Cannot set initial state as {}'.format(resource._resource.get('state'))
+            }]
+            raise exceptions.Unauthorized({'errors': err})
 
         yield resource._save()
 
@@ -244,15 +247,6 @@ class Document(object):
 
     @coroutine
     def update(self, user, **kwargs):
-        fields_to_update = set(kwargs.keys()) & set(self._resource.keys())
-
-        # Should only be able to edit resource if in editable state or being changed to editable state
-        current_state_editable = self.state in self.editable_states
-        new_state_editable = 'state' in kwargs and getattr(State, kwargs['state'], None) in self.editable_states
-        if not current_state_editable and not new_state_editable:
-            err = '{} resource cannot be updated'.format(self.state.name)
-            raise exceptions.Unauthorized(err)
-
         if user:
             can_update, fields = yield self.can_update(user, **kwargs)
         else:
@@ -271,19 +265,21 @@ class Document(object):
                 err = 'User is not authorised to update this resource'
                 raise exceptions.Unauthorized(err)
 
-        errors = []
-
-        read_only_fields = fields_to_update & self._read_only
-        if read_only_fields:
-            msg = '{} may not be modified'
-            errors += [msg.format(x) for x in read_only_fields]
+        fields_to_update = set(kwargs.keys()) & set(self._resource.keys())
 
         state_field_update = fields_to_update & {'state'}
         if state_field_update and \
                 not (yield self.validate_state_transition(user, self._resource.get('state'), kwargs['state'], **kwargs)):
-            errors += ['Cannot transition from {} state to {} state'.format(self.state.name, kwargs['state'])]
+            err = [{
+                'field': 'state',
+                'message': 'Cannot transition from {} state to {} state'.format(self.state.name, kwargs['state'])
+            }]
+            raise exceptions.Unauthorized({'errors': err})
 
-        if errors:
+        read_only_fields = fields_to_update & self._read_only
+        if read_only_fields:
+            msg = '{} may not be modified'
+            errors = [msg.format(x) for x in read_only_fields]
             raise exceptions.ValidationError(errors)
 
         self._resource.update(kwargs)
@@ -389,6 +385,13 @@ class Document(object):
     @coroutine
     def can_update(self, user, **data):
         """Check if a user is authorized to update a resource"""
+
+        # Should only be able to edit resource if in editable state or being changed to editable state
+        current_state_editable = self.state in self.editable_states
+        new_state_editable = 'state' in data and getattr(State, data['state'], None) in self.editable_states
+        if not current_state_editable and not new_state_editable:
+            raise Return((False, set([])))
+
         raise Return((True, set([])))
 
     @coroutine

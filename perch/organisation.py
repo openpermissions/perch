@@ -205,17 +205,19 @@ class Organisation(Document):
         :param data: data that the user wants to update
         :returns: bool, set of fields that the user was not authorized to update
         """
+        update, fields = yield super(Organisation, self).can_update(user, **data)
+
         if user.is_admin():
-            raise Return((True, set([])))
+            raise Return((update, fields))
 
         org_admin = user.is_org_admin(self.id)
         creator = self.created_by == user.id
         if org_admin or creator:
-            fields = {'star_rating'} & set(data.keys())
+            fields = fields | {'star_rating'} & set(data.keys())
             if fields:
                 raise Return((False, fields))
             else:
-                raise Return((True, set([])))
+                raise Return((update, fields))
 
         raise Return((False, set([])))
 
@@ -303,6 +305,7 @@ class Service(SubResource):
     parent_key = 'services'
     read_only_fields = ['created_by']
     view = views.services
+    active_view = views.active_services
 
     default_permission = [{'type': 'all', 'value': None, 'permission': 'rw'}]
     schema = MetaSchema({
@@ -416,32 +419,30 @@ class Service(SubResource):
     @coroutine
     def can_approve(self, user, **data):
         """
-        Org admins or sys admins can approve a service
+        Only sys admins can approve a service
         :param user: a User
         :param data: data that the user wants to update
         """
-        service_type = data.get('service_type', self.service_type)
-        organisation_id = data.get('organisation_id', self.organisation_id)
-
-        is_external = service_type == 'external'
-        is_org_admin = user.is_org_admin(organisation_id)
-        raise Return(is_org_admin or is_external)
+        is_external = data.get('service_type', self.service_type) == 'external'
+        raise Return(user.is_admin() or is_external)
 
     @coroutine
     def can_update(self, user, **kwargs):
         """Org admins may not update organisation_id or service_type"""
+        update, fields = yield super(Service, self).can_update(user, **kwargs)
+
         if user.is_admin():
-            raise Return((True, set([])))
+            raise Return((update, fields))
 
         is_creator = self.created_by == user.id
         if not (user.is_org_admin(self.organisation_id) or is_creator):
             raise Return((False, set([])))
 
-        fields = {'service_type', 'organisation_id'} & set(kwargs.keys())
+        fields = fields | ({'service_type', 'organisation_id'} & set(kwargs.keys()))
         if fields:
             raise Return((False, fields))
         else:
-            raise Return((True, set([])))
+            raise Return((update, fields))
 
     @classmethod
     @coroutine
@@ -634,27 +635,30 @@ class Repository(SubResource):
         If the user is a service administrator the user may change the "state"
         but no other fields.
         """
+        update, fields = yield super(Repository, self).can_update(user, **kwargs)
+
         if user.is_admin():
-            raise Return((True, set([])))
+            raise Return((update, fields))
 
         is_creator = self.created_by == user.id
         if user.is_org_admin(self.organisation_id) or is_creator:
-            fields = set([])
             if 'organisation_id' in kwargs:
                 fields.add('organisation_id')
 
             if fields:
                 raise Return((False, fields))
             else:
-                raise Return((True, set([])))
+                raise Return((update, fields))
 
         try:
             service = yield Service.get(self.service_id)
 
             if user.is_org_admin(service.organisation_id):
-                fields = set(kwargs) - {'state'}
+                fields = fields | (set(kwargs) - {'state'})
                 if fields:
                     raise Return((False, fields))
+                else:
+                    raise Return((update, fields))
         except couch.NotFound:
             # will be handled in Repository.validate
             pass
