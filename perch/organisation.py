@@ -159,20 +159,25 @@ class Organisation(Document):
 
     @classmethod
     @coroutine
-    def user_organisations(cls, user_id, state=None):
+    def user_organisations(cls, user_id, state=None, include_deactivated=False):
         """
         Get organisations that the user has joined
 
         :param user_id: the user ID
         :param state: the user's "join" state
+        :param include_deactivated: Include deactivated resources in response
         :returns: list of Organisation instances
         :raises: SocketError, CouchException
         """
         if state and state not in validators.VALID_STATES:
             raise exceptions.ValidationError('Invalid "state"')
 
-        organisations = yield views.joined_organisations.get(
-            key=[user_id, state], include_docs=True)
+        if include_deactivated:
+            organisations = yield views.joined_organisations.get(
+                key=[user_id, state], include_docs=True)
+        else:
+            organisations = yield views.active_joined_organisations.get(
+                key=[user_id, state], include_docs=True)
 
         raise Return([cls(**org['doc']) for org in organisations['rows']])
 
@@ -299,6 +304,7 @@ class Service(SubResource):
     parent_key = 'services'
     read_only_fields = ['created_by']
     view = views.services
+    active_view = views.active_services
 
     default_permission = [{'type': 'all', 'value': None, 'permission': 'rw'}]
     schema = MetaSchema({
@@ -485,6 +491,7 @@ class Repository(SubResource):
     parent_key = 'repositories'
     read_only_fields = ['created_by']
     view = views.repositories
+    active_view = views.active_repositories
 
     _repository_name_length = Length(min=options.min_length_repository_name,
                                      max=options.max_length_repository_name)
@@ -561,24 +568,6 @@ class Repository(SubResource):
         if service.state != State.approved:
             raise exceptions.ValidationError('{} is not an approved service'
                                              .format(self.service_id))
-
-    @classmethod
-    @coroutine
-    def all(cls, include_deactivated=False):
-        """
-        Get all resources
-
-        :param include_deactivated: Flag to include deactivated Repositories
-
-        :returns: list of Resource instances
-        :raises: SocketError, CouchException
-        """
-        if include_deactivated:
-            resources = yield views.repositories.get(include_docs=True)
-        else:
-            resources = yield views.active_repositories.get(include_docs=True)
-
-        raise Return([cls(**resource['doc']) for resource in resources['rows']])
 
     @coroutine
     def check_unique(self):
@@ -712,7 +701,7 @@ def generate_secret(length=30):
 class OAuthSecret(Document):
     db_name = 'registry'
     resource_type = 'oauth_client_credentials'
-    view = views.oauth_secrets
+    view = active_view = views.oauth_secrets
 
     schema = Schema({
         Required('_id', default=generate_secret): unicode,

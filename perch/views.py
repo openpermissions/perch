@@ -160,11 +160,26 @@ def load_design_docs(force=False):
 
 
 @view('registry', '1.0.0')
+def active_users(doc):
+    """View for getting users"""
+    if doc.get('type') == 'user' and doc.get('state') != 'deactivated':
+        yield doc.get('email'), doc['_id']
+
+@view('registry', '1.0.0')
 def users(doc):
     """View for getting users"""
     if doc.get('type') == 'user':
         yield doc.get('email'), doc['_id']
 
+@view('registry', '1.0.0')
+def active_user_organisations_resource(doc):
+    """Get user.organisations subresouces"""
+    if doc.get('type') == 'user' and doc.get('state') != 'deactivated':
+        for org_id, resource in doc.get('organisations', {}).items():
+            if resource['state'] != 'deactivated':
+                resource['id'] = org_id
+                resource['user_id'] = doc['_id']
+                yield [doc['_id'], org_id], resource
 
 @view('registry', '1.0.0')
 def user_organisations_resource(doc):
@@ -175,6 +190,23 @@ def user_organisations_resource(doc):
             resource['user_id'] = doc['_id']
             yield [doc['_id'], org_id], resource
 
+@view('registry', '1.0.0')
+def active_joined_organisations(doc):
+    """View for getting organisations associated with a user"""
+    if doc.get('type') == 'user' and doc.get('state') != 'deactivated':
+        for org_id, state in doc.get('organisations', {}).items():
+            if org_id == 'global':
+                continue
+            if state['state'] == 'deactivated':
+                continue
+
+            org = {'_id': org_id}
+            yield [doc['_id'], None], org
+
+            try:
+                yield [doc['_id'], state['state']], org
+            except KeyError:
+                pass
 
 @view('registry', '1.0.1')
 def joined_organisations(doc):
@@ -201,12 +233,12 @@ def organisation_members(doc):
             yield org_id, doc['_id']
 
 
-@view('registry', '1.0.0')
+@view('registry', '1.0.1')
 def admin_emails(doc):
     """View for an orginsation's admin email addresses"""
-    if doc.get('type') == 'user':
+    if doc.get('type') == 'user' and doc.get('state') != 'deactivated':
         for org_id, state in doc.get('organisations', {}).items():
-            if state.get('role') == 'administrator':
+            if state.get('role') == 'administrator' and state.get('state') != 'deactivated':
                 yield org_id, doc['email']
 
 

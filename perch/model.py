@@ -35,22 +35,6 @@ class State(Enum):
     rejected = 2
     deactivated = 3
 
-EDITABLE_STATES = [State.approved, State.pending]
-
-APPROVAL_STATE_TRANSITIONS = {
-    None: [State.approved],
-    State.pending: [State.approved, State.rejected],
-    State.deactivated: [State.approved],
-}
-
-STATE_TRANSITIONS = {
-    None: [State.pending],
-    State.pending: [State.deactivated],
-    State.approved: [State.pending, State.deactivated],
-    State.rejected: [State.pending, State.deactivated],
-    State.deactivated: [State.pending]
-}
-
 
 def format_error(invalid, doc_type):
     """
@@ -80,7 +64,23 @@ class Document(object):
     }, extra=ALLOW_EXTRA)
     # read only fields can not be changed after the resource has been created
     read_only_fields = []
+
     default_state = State.pending
+    editable_states = [State.approved, State.pending]
+
+    approval_state_transitions = {
+        None: [State.approved],
+        State.pending: [State.approved, State.rejected],
+        State.deactivated: [State.approved],
+    }
+
+    state_transitions = {
+        None: [State.pending],
+        State.pending: [State.deactivated],
+        State.approved: [State.pending, State.deactivated],
+        State.rejected: [State.pending, State.deactivated],
+        State.deactivated: [State.pending]
+    }
 
     def __init__(self, **kwargs):
         self._resource = deepcopy(kwargs)
@@ -153,11 +153,13 @@ class Document(object):
 
     @classmethod
     @coroutine
-    def get(cls, resource_id):
+    def get(cls, resource_id, include_deactivated=False):
         """
         Get a resource
 
         :param resource_id: a resource's ID
+        :param include_deactivated: Include deactivated resources in response
+
         :returns: Document instance
         :raises: SocketError, CouchException
         """
@@ -166,18 +168,25 @@ class Document(object):
         if resource.get('type') != cls.resource_type:
             raise exceptions.NotFound()
 
+        if not include_deactivated and resource.get('state') == State.deactivated.name:
+            raise exceptions.NotFound()
+
         raise Return(cls(**resource))
 
     @classmethod
     @coroutine
-    def all(cls):
+    def all(cls, include_deactivated=False):
         """
         Get all resources
+        :param include_deactivated: Include deactivated resources in response
 
         :returns: list of Document instances
         :raises: SocketError, CouchException
         """
-        resources = yield cls.view.get(include_docs=True)
+        if include_deactivated:
+            resources = yield cls.view.get(include_docs=True)
+        else:
+            resources = yield cls.active_view.get(include_docs=True)
         raise Return([cls(**resource['doc']) for resource in resources['rows']])
 
     @classmethod
@@ -221,11 +230,11 @@ class Document(object):
         if start_state == end_state:
             raise Return(True)
 
-        allowed_transitions = STATE_TRANSITIONS.get(start_state, [])
+        allowed_transitions = self.state_transitions.get(start_state, [])
 
         can_approve = yield self.can_approve(user, **kwargs)
         if can_approve:
-            allowed_transitions += APPROVAL_STATE_TRANSITIONS.get(start_state, [])
+            allowed_transitions += self.approval_state_transitions.get(start_state, [])
 
         if end_state not in allowed_transitions:
             raise Return(False)
@@ -237,8 +246,8 @@ class Document(object):
         fields_to_update = set(kwargs.keys()) & set(self._resource.keys())
 
         # Should only be able to edit resource if in editable state or being changed to editable state
-        current_state_editable = self.state in EDITABLE_STATES
-        new_state_editable = 'state' in kwargs and getattr(State, kwargs['state']) in EDITABLE_STATES
+        current_state_editable = self.state in self.editable_states
+        new_state_editable = 'state' in kwargs and getattr(State, kwargs['state']) in self.editable_states
         if not current_state_editable and not new_state_editable:
             err = '{} resource cannot be updated'.format(self.state.name)
             raise exceptions.Unauthorized(err)
@@ -454,7 +463,7 @@ class SubResource(Document):
         parent_id = kwargs.get(cls.parent_resource.resource_type + '_id')
         parent = yield cls.parent_resource.get(parent_id)
 
-        if parent.state not in EDITABLE_STATES:
+        if parent.state not in cls.editable_states:
             err = 'Cannot create child of {} resource'.format(parent.state.name)
             raise exceptions.Unauthorized(err)
 
@@ -468,7 +477,7 @@ class SubResource(Document):
         """If parent resource is not an editable state, should not be able to update"""
         yield self.get_parent()
 
-        if self.parent.state not in EDITABLE_STATES:
+        if self.parent.state not in self.editable_states:
             err = 'Cannot update child of {} resource'.format(self.parent.state)
             raise exceptions.Unauthorized(err)
 
@@ -491,29 +500,38 @@ class SubResource(Document):
 
     @classmethod
     @coroutine
-    def get(cls, resource_id):
+    def get(cls, resource_id, include_deactivated=False):
         """
         Get a resource
 
         :param resource_id: the resource ID
+        :param include_deactivated: Include deactivated resources in response
         :returns: a SubResource instance
         :raises: SocketError, CouchException
         """
-        resource = yield cls.view.first(key=resource_id, include_docs=True)
+        if include_deactivated:
+            resource = yield cls.view.first(key=resource_id, include_docs=True)
+        else:
+            resource = yield cls.active_view.first(key=resource_id, include_docs=True)
         parent = cls.parent_resource(**resource['doc'])
 
         raise Return(cls(parent=parent, **resource['value']))
 
     @classmethod
     @coroutine
-    def all(cls):
+    def all(cls, include_deactivated=False):
         """
         Get all sub-resources
+        :param include_deactivated: Include deactivated resources in response
 
         :returns: list of SubResource instances
         :raises: SocketError, CouchException
         """
-        resources = yield cls.view.get(include_docs=True)
+        if include_deactivated:
+            resources = yield cls.view.get(include_docs=True)
+        else:
+            resources = yield cls.active_view.get(include_docs=True)
+
         result = []
 
         for resource in resources['rows']:

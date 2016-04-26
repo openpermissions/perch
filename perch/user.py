@@ -35,10 +35,23 @@ define('token_ttl', default=86400)
 class User(Document):
     resource_type = 'user'
     view = views.users
+    active_view = views.active_users
     db_name = 'registry'
     internal_fields = (Document.internal_fields +
                        ['password', 'verification_hash'])
     read_only_fields = ['created_by']
+
+    editable_states = [State.approved]
+
+    approval_state_transitions = {
+        State.pending: [State.approved]
+    }
+
+    state_transitions = {
+        None: [State.pending],
+        State.pending: [State.deactivated],
+        State.approved: [State.deactivated]
+    }
 
     class roles(Enum):
         administrator = 'administrator'
@@ -55,7 +68,7 @@ class User(Document):
         }
         orgs_schema = Schema({
             Extra: {
-                'state': validators.validate_state,
+                'state': validators.validate_user_state,
                 'role': In([x.value for x in cls.roles])
             }
         }, required=True)
@@ -71,7 +84,7 @@ class User(Document):
             Required('password'): All(unicode, password_length),
             Required('has_agreed_to_terms'): True,
             Required('organisations', default=default_global): orgs_schema,
-            Required('verified', default=False): bool,
+            Required('state', default=SubResource.default_state.name): validators.validate_user_state,
             'first_name': unicode,
             'last_name': unicode,
             'phone': unicode,
@@ -95,7 +108,6 @@ class User(Document):
     @classmethod
     @coroutine
     def create(cls, user, password, **kwargs):
-        kwargs['verified'] = False
         kwargs['verification_hash'] = unicode(uuid.uuid4().hex)
 
         resource = cls(password=cls.hash_password(password), **kwargs)
@@ -177,17 +189,17 @@ class User(Document):
         :returns: a User instance
         """
         user = yield cls.get(user_id)
-        if user.verified:
+        if user.state != State.pending:
             raise Return(user)
 
-        # NOTE: if the user is not verified and doesn't have a verification
+        # NOTE: if the user is pending and doesn't have a verification
         # hash, then this will result in an error
         # TODO: do we need to handle this scenario?
         if user.verification_hash != verification_hash:
             raise exceptions.ValidationError('Invalid verification hash')
 
         del user.verification_hash
-        user.verified = True
+        user.state = State.approved.name
         yield user._save()
 
         raise Return(user)
@@ -228,7 +240,7 @@ class User(Document):
                                                      include_docs=True)
         users = [x['doc'] for x in users['rows']]
         for user in users:
-            del user['organisations'][organisation_id]
+            user['organisations'][organisation_id]['state'] = State.deactivated.name
 
         db = cls.db_client()
         yield db.save_docs(users)
@@ -277,6 +289,7 @@ class UserOrganisation(SubResource):
     parent_resource = User
     parent_key = 'organisations'
     view = views.user_organisations_resource
+    active_view = views.active_user_organisations_resource
     internal_fields = ['id', 'user_id']
 
     schema = Schema({
