@@ -270,7 +270,7 @@ def validate_service_schema(v):
         v['state'] = State.approved.name
     else:
         if 'location' not in v:
-            raise Invalid('location is required')
+            raise Invalid('location is required', path=['location'])
 
     return v
 
