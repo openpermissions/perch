@@ -41,15 +41,13 @@ class User(Document):
                        ['password', 'verification_hash'])
     read_only_fields = ['created_by']
 
+    default_state = State.approved
     editable_states = [State.approved]
 
-    approval_state_transitions = {
-        State.pending.name: [State.approved.name]
-    }
+    approval_state_transitions = {}
 
     state_transitions = {
-        None: [State.pending.name],
-        State.pending.name: [State.deactivated.name],
+        None: [State.approved.name],
         State.approved.name: [State.deactivated.name]
     }
 
@@ -84,7 +82,8 @@ class User(Document):
             Required('password'): All(unicode, password_length),
             Required('has_agreed_to_terms'): True,
             Required('organisations', default=default_global): orgs_schema,
-            Required('state', default=SubResource.default_state.name): validators.validate_user_state,
+            Required('verified', default=False): bool,
+            Required('state', default=User.default_state.name): validators.validate_user_state,
             'first_name': unicode,
             'last_name': unicode,
             'phone': unicode,
@@ -93,6 +92,16 @@ class User(Document):
         })
 
         return schema(doc)
+
+    @coroutine
+    def can_update(self, user, **kwargs):
+        update, fields = yield super(User, self).can_update(user, **kwargs)
+
+        # Can only update if admin or user being updated
+        if not (user.id == self.id or user.is_admin()):
+            raise Return((False, []))
+
+        raise Return((update, fields))
 
     @coroutine
     def check_unique(self):
@@ -108,6 +117,7 @@ class User(Document):
     @classmethod
     @coroutine
     def create(cls, user, password, **kwargs):
+        kwargs['verified'] = False
         kwargs['verification_hash'] = unicode(uuid.uuid4().hex)
 
         resource = cls(password=cls.hash_password(password), **kwargs)
@@ -189,17 +199,17 @@ class User(Document):
         :returns: a User instance
         """
         user = yield cls.get(user_id)
-        if user.state != State.pending:
+        if user.verified:
             raise Return(user)
 
-        # NOTE: if the user is pending and doesn't have a verification
+        # NOTE: if the user is not verified and doesn't have a verification
         # hash, then this will result in an error
         # TODO: do we need to handle this scenario?
         if user.verification_hash != verification_hash:
             raise exceptions.ValidationError('Invalid verification hash')
 
         del user.verification_hash
-        user.state = State.approved.name
+        user.verified = True
         yield user._save()
 
         raise Return(user)
@@ -291,6 +301,7 @@ class UserOrganisation(SubResource):
     view = views.user_organisations_resource
     active_view = views.active_user_organisations_resource
     internal_fields = ['id', 'user_id']
+    editable_states = [State.approved]
 
     schema = Schema({
         'id': unicode,
@@ -318,7 +329,7 @@ class UserOrganisation(SubResource):
         update, fields = yield super(UserOrganisation, self).can_update(user, **kwargs)
 
         # Can only update if org admin or user being updated
-        if not (user.id == self.id or user.is_org_admin(self.organisation_id)):
+        if not (user.id == self.user_id or user.is_org_admin(self.organisation_id)):
             raise Return((False, []))
 
         if 'role' in kwargs:

@@ -100,7 +100,7 @@ def validate_url(url):
 
 
 VALID_STATES = {x.name for x in State}
-VALID_USER_STATES = {x.name for x in [State.pending, State.approved, State.rejected]}
+VALID_USER_STATES = {x.name for x in [State.approved, State.deactivated]}
 
 
 def validate_state(state):
