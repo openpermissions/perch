@@ -51,7 +51,12 @@ def format_error(invalid, doc_type):
         msg = "{} '{}' is missing".format(doc_type, invalid.path[0])
     else:
         msg = invalid.message
-    return {'message': msg, 'field': str(invalid.path[0])}
+
+    error = {'message': msg}
+    if invalid.path:
+        error['field'] = str(invalid.path[0])
+
+    return error
 
 
 class Document(object):
