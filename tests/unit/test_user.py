@@ -204,3 +204,5 @@ class ChangePassword(AsyncTestCase):
 
         with pytest.raises(exceptions.Unauthorized):
             yield user.change_password('password2', 'password3')
+
+
