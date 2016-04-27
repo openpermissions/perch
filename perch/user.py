@@ -59,8 +59,8 @@ class User(Document):
         user = 'user'
         default = user
 
-    @classmethod
-    def schema(cls, doc):
+    @property
+    def schema(cls):
         default_global = {
             GLOBAL: {
                 'state': State.approved.name,
@@ -94,7 +94,7 @@ class User(Document):
             'actor': unicode  # only used in fixtures, should it be removed?
         })
 
-        return schema(doc)
+        return schema
 
     @coroutine
     def can_update(self, user, **kwargs):

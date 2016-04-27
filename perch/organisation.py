@@ -54,8 +54,8 @@ class Organisation(Document):
     internal_fields = Document.internal_fields + ['services', 'repositories']
     read_only_fields = ['created_by']
 
-    @classmethod
-    def schema(cls, doc):
+    @property
+    def schema(cls):
         name_length = Length(min=options.min_length_organisation_name,
                              max=options.max_length_organisation_name)
 
@@ -95,7 +95,7 @@ class Organisation(Document):
             'modal_link_url': Any(validators.validate_url, '', None)
         })
 
-        return schema(doc)
+        return schema
 
     @coroutine
     def create_default_service(self, user):

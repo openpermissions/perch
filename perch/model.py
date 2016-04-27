@@ -16,7 +16,7 @@ from operator import attrgetter
 import couch
 from tornado.gen import coroutine, Return
 from tornado.options import options
-from voluptuous import MultipleInvalid, Schema, ALLOW_EXTRA
+from voluptuous import MultipleInvalid, Schema, ALLOW_EXTRA, Required, Undefined
 
 from . import exceptions
 
@@ -92,7 +92,11 @@ class Document(object):
 
     def __getattr__(self, attr):
         try:
-            return self._resource[attr]
+            if self._resource.get(attr):
+                return self._resource[attr]
+            else:
+                defaults = self.get_required_fields_with_defaults(self.schema)
+                return defaults[attr]
         except KeyError:
             raise AttributeError(attr)
 
@@ -135,15 +139,24 @@ class Document(object):
 
     @coroutine
     def validate(self):
-        """Validate the resource using it's voluptuous schema"""
+        """Validate the resource using its voluptuous schema"""
         try:
-            # update _resource so have default values from the schema
+            # update _resource to have default values from the schema
             self._resource = self.schema(self._resource)
         except MultipleInvalid as e:
             errors = [format_error(err, self.resource_type) for err in e.errors]
             raise exceptions.ValidationError({'errors': errors})
 
         yield self.check_unique()
+
+    @classmethod
+    def get_required_fields_with_defaults(cls, schema):
+        defaults = {}
+        required_keys = set(key for key in schema.schema if isinstance(key, Required))
+        for key in required_keys:
+            if not isinstance(key.default, Undefined):
+                defaults[unicode(key)] = key.default()
+        return defaults
 
     @coroutine
     def check_unique(self):
