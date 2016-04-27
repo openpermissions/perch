@@ -205,19 +205,17 @@ class Organisation(Document):
         :param data: data that the user wants to update
         :returns: bool, set of fields that the user was not authorized to update
         """
-        update, fields = yield super(Organisation, self).can_update(user, **data)
-
         if user.is_admin():
-            raise Return((update, fields))
+            raise Return((True, set([])))
 
         org_admin = user.is_org_admin(self.id)
         creator = self.created_by == user.id
         if org_admin or creator:
-            fields = fields | {'star_rating'} & set(data.keys())
+            fields = {'star_rating'} & set(data.keys())
             if fields:
                 raise Return((False, fields))
             else:
-                raise Return((update, fields))
+                raise Return((True, set([])))
 
         raise Return((False, set([])))
 
@@ -429,20 +427,18 @@ class Service(SubResource):
     @coroutine
     def can_update(self, user, **kwargs):
         """Org admins may not update organisation_id or service_type"""
-        update, fields = yield super(Service, self).can_update(user, **kwargs)
-
         if user.is_admin():
-            raise Return((update, fields))
+            raise Return((True, set([])))
 
         is_creator = self.created_by == user.id
         if not (user.is_org_admin(self.organisation_id) or is_creator):
             raise Return((False, set([])))
 
-        fields = fields | ({'service_type', 'organisation_id'} & set(kwargs.keys()))
+        fields = ({'service_type', 'organisation_id'} & set(kwargs.keys()))
         if fields:
             raise Return((False, fields))
         else:
-            raise Return((update, fields))
+            raise Return((True, set([])))
 
     @classmethod
     @coroutine
@@ -635,30 +631,29 @@ class Repository(SubResource):
         If the user is a service administrator the user may change the "state"
         but no other fields.
         """
-        update, fields = yield super(Repository, self).can_update(user, **kwargs)
-
         if user.is_admin():
-            raise Return((update, fields))
+            raise Return((True, set([])))
 
         is_creator = self.created_by == user.id
         if user.is_org_admin(self.organisation_id) or is_creator:
+            fields = set([])
             if 'organisation_id' in kwargs:
                 fields.add('organisation_id')
 
             if fields:
                 raise Return((False, fields))
             else:
-                raise Return((update, fields))
+                raise Return((True, set([])))
 
         try:
             service = yield Service.get(self.service_id)
 
             if user.is_org_admin(service.organisation_id):
-                fields = fields | (set(kwargs) - {'state'})
+                fields = set(kwargs) - {'state'}
                 if fields:
                     raise Return((False, fields))
                 else:
-                    raise Return((update, fields))
+                    raise Return((True, fields))
         except couch.NotFound:
             # will be handled in Repository.validate
             pass

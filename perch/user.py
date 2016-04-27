@@ -95,13 +95,11 @@ class User(Document):
 
     @coroutine
     def can_update(self, user, **kwargs):
-        update, fields = yield super(User, self).can_update(user, **kwargs)
-
         # Can only update if admin or user being updated
         if not (user.id == self.id or user.is_admin()):
-            raise Return((False, []))
+            raise Return((False, set([])))
 
-        raise Return((update, fields))
+        raise Return((True, set([])))
 
     @coroutine
     def check_unique(self):
@@ -326,14 +324,12 @@ class UserOrganisation(SubResource):
 
     @coroutine
     def can_update(self, user, **kwargs):
-        update, fields = yield super(UserOrganisation, self).can_update(user, **kwargs)
-
         # Can only update if org admin or user being updated
         if not (user.id == self.user_id or user.is_org_admin(self.organisation_id)):
-            raise Return((False, []))
+            raise Return((False, set([])))
 
         if 'role' in kwargs:
             if not user.is_org_admin(self.organisation_id):
-                raise Return((False, fields | {'role'}))
+                raise Return((False, {'role'}))
 
-        raise Return((update, fields))
+        raise Return((True, set([])))

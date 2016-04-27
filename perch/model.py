@@ -68,12 +68,7 @@ class Document(object):
     default_state = State.pending
     editable_states = [State.approved, State.pending]
 
-    approval_state_transitions = {
-        None: [State.approved.name],
-        State.pending.name: [State.approved.name, State.rejected.name],
-        State.deactivated.name: [State.approved.name],
-    }
-
+    # State transitions that can be performed by users with permission to update resource
     state_transitions = {
         None: [State.pending.name],
         State.pending.name: [State.deactivated.name],
@@ -81,6 +76,15 @@ class Document(object):
         State.rejected.name: [State.deactivated.name],
         State.deactivated.name: [State.pending.name]
     }
+
+    # State transitions that can be performed by users with permission to approve resource
+    # These are in addition to regular state_transitions
+    approval_state_transitions = {
+        None: [State.approved.name],
+        State.pending.name: [State.approved.name, State.rejected.name],
+        State.deactivated.name: [State.approved.name],
+    }
+
 
     def __init__(self, **kwargs):
         self._resource = deepcopy(kwargs)
@@ -124,6 +128,10 @@ class Document(object):
     @id.setter
     def id(self, value):
         self._id = value
+
+    @property
+    def editable(self):
+        return self.state in self.editable_states
 
     @coroutine
     def validate(self):
@@ -253,6 +261,12 @@ class Document(object):
             can_update = False
             fields = []
 
+        new_state = getattr(State, kwargs.get('state', ''), self.state)
+        can_edit = {self.state, new_state}.intersection(set(self.editable_states))
+        if not can_edit:
+            err = 'User is not authorised to update resource with state {}'.format(new_state.name)
+            raise exceptions.Unauthorized(err)
+
         if not can_update:
             if fields:
                 msg = "User cannot update field '{}'"
@@ -283,6 +297,7 @@ class Document(object):
             raise exceptions.ValidationError(errors)
 
         self._resource.update(kwargs)
+
         yield self._save()
 
     @coroutine
@@ -385,13 +400,6 @@ class Document(object):
     @coroutine
     def can_update(self, user, **data):
         """Check if a user is authorized to update a resource"""
-
-        # Should only be able to edit resource if in editable state or being changed to editable state
-        current_state_editable = self.state in self.editable_states
-        new_state_editable = 'state' in data and getattr(State, data['state'], None) in self.editable_states
-        if not current_state_editable and not new_state_editable:
-            raise Return((False, set([])))
-
         raise Return((True, set([])))
 
     @coroutine
@@ -468,14 +476,20 @@ class SubResource(Document):
     def create(cls, user, **kwargs):
         """If parent resource is not an editable state, should not be able to create."""
         parent_id = kwargs.get(cls.parent_resource.resource_type + '_id')
-        parent = yield cls.parent_resource.get(parent_id)
+        try:
+            parent = yield cls.parent_resource.get(parent_id)
+        except couch.NotFound:
+            msg = 'Parent {} with id {} not found'.format(
+                cls.parent_resource.resource_type,
+                parent_id)
+            raise exceptions.ValidationError(msg)
 
-        if parent.state not in cls.editable_states:
+        if not parent.editable:
             err = 'Cannot create child of {} resource'.format(parent.state.name)
             raise exceptions.Unauthorized(err)
 
         resource = yield super(SubResource, cls).create(user, **kwargs)
-        yield resource.get_parent()
+        resource._parent = parent
 
         raise Return(resource)
 
@@ -484,8 +498,8 @@ class SubResource(Document):
         """If parent resource is not an editable state, should not be able to update"""
         yield self.get_parent()
 
-        if self.parent.state not in self.editable_states:
-            err = 'Cannot update child of {} resource'.format(self.parent.state)
+        if not self.parent.editable:
+            err = 'Cannot update child of {} resource'.format(self.parent.state.name)
             raise exceptions.Unauthorized(err)
 
         yield super(SubResource, self).update(user, **kwargs)
