@@ -282,13 +282,17 @@ class Document(object):
         fields_to_update = set(kwargs.keys()) & set(self._resource.keys())
 
         state_field_update = fields_to_update & {'state'}
-        if state_field_update and \
-                not (yield self.validate_state_transition(user, self._resource.get('state'), kwargs['state'], **kwargs)):
-            err = [{
-                'field': 'state',
-                'message': 'Cannot transition from {} state to {} state'.format(self.state.name, kwargs['state'])
-            }]
-            raise exceptions.Unauthorized({'errors': err})
+
+        if state_field_update:
+            can_transition = yield self.validate_state_transition(user, self._resource.get('state'),
+                                                                  kwargs['state'], **kwargs)
+            if not can_transition:
+                err = [{
+                    'field': 'state',
+                    'message': ('Cannot transition from {} state to {} state'
+                                .format(self.state.name, kwargs['state']))
+                }]
+                raise exceptions.Unauthorized({'errors': err})
 
         read_only_fields = fields_to_update & self._read_only
         if read_only_fields:

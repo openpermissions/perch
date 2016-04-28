@@ -491,6 +491,9 @@ class Repository(SubResource):
     view = views.repositories
     active_view = views.active_repositories
 
+    # State transitions for repositories overridden so that:
+    # - Cannot deactivate an approved repository
+    # - Repository can move from approved to pending when moved to a new repository service
     approval_state_transitions = {
         None: [State.approved.name],
         State.pending.name: [State.approved.name, State.rejected.name]

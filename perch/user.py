@@ -44,6 +44,9 @@ class User(Document):
     default_state = State.approved
     editable_states = [State.approved]
 
+    # State transitions for users overridden so that:
+    # - Only valid states are approved and deactivated
+    # - Once user is deactivated cannot be reactivated
     approval_state_transitions = {}
 
     state_transitions = {
