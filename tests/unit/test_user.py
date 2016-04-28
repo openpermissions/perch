@@ -26,6 +26,7 @@ USERS = [
         'email': 'user0@mail.test',
         'password': User.hash_password('password0'),
         'verified': True,
+        'state': 'approved',
         'has_agreed_to_terms': True,
         'organisations': {}
     }, {
@@ -34,6 +35,7 @@ USERS = [
         'email': 'user1@mail.test',
         'password': User.hash_password('password1'),
         'verified': False,
+        'state': 'approved',
         'has_agreed_to_terms': True,
         'verification_hash': 'this is a hash'
     }
@@ -70,6 +72,7 @@ class CreateUser(AsyncTestCase):
             assert user.last_name == 'user'
             assert user.password != 'password'
             assert user.verify_password('password')
+            assert user.state == State.approved
             assert not user.verified
             assert user.verification_hash
 
@@ -133,6 +136,7 @@ class Verify(AsyncTestCase):
                                      UNVERIFIED_USER['verification_hash'])
 
         assert user.id == UNVERIFIED_USER['_id']
+        assert user.state == State.approved
         assert user.verified
         assert 'verification_hash' not in user._resource
         db_client().save_doc.assert_called_once_with(user._resource)
@@ -200,3 +204,5 @@ class ChangePassword(AsyncTestCase):
 
         with pytest.raises(exceptions.Unauthorized):
             yield user.change_password('password2', 'password3')
+
+

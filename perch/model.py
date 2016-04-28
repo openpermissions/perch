@@ -64,7 +64,27 @@ class Document(object):
     }, extra=ALLOW_EXTRA)
     # read only fields can not be changed after the resource has been created
     read_only_fields = []
+
     default_state = State.pending
+    editable_states = [State.approved, State.pending]
+
+    # State transitions that can be performed by users with permission to update resource
+    state_transitions = {
+        None: [State.pending.name],
+        State.pending.name: [State.deactivated.name],
+        State.approved.name: [State.deactivated.name],
+        State.rejected.name: [State.deactivated.name],
+        State.deactivated.name: [State.pending.name]
+    }
+
+    # State transitions that can be performed by users with permission to approve resource
+    # These are in addition to regular state_transitions
+    approval_state_transitions = {
+        None: [State.approved.name],
+        State.pending.name: [State.approved.name, State.rejected.name],
+        State.deactivated.name: [State.approved.name],
+    }
+
 
     def __init__(self, **kwargs):
         self._resource = deepcopy(kwargs)
@@ -109,6 +129,10 @@ class Document(object):
     def id(self, value):
         self._id = value
 
+    @property
+    def editable(self):
+        return self.state in self.editable_states
+
     @coroutine
     def validate(self):
         """Validate the resource using it's voluptuous schema"""
@@ -137,11 +161,13 @@ class Document(object):
 
     @classmethod
     @coroutine
-    def get(cls, resource_id):
+    def get(cls, resource_id, include_deactivated=False):
         """
         Get a resource
 
         :param resource_id: a resource's ID
+        :param include_deactivated: Include deactivated resources in response
+
         :returns: Document instance
         :raises: SocketError, CouchException
         """
@@ -150,36 +176,82 @@ class Document(object):
         if resource.get('type') != cls.resource_type:
             raise exceptions.NotFound()
 
+        if not include_deactivated and resource.get('state') == State.deactivated.name:
+            raise exceptions.NotFound()
+
         raise Return(cls(**resource))
 
     @classmethod
     @coroutine
-    def all(cls):
+    def all(cls, include_deactivated=False):
         """
         Get all resources
+        :param include_deactivated: Include deactivated resources in response
 
         :returns: list of Document instances
         :raises: SocketError, CouchException
         """
-        resources = yield cls.view.get(include_docs=True)
+        if include_deactivated:
+            resources = yield cls.view.get(include_docs=True)
+        else:
+            resources = yield cls.active_view.get(include_docs=True)
         raise Return([cls(**resource['doc']) for resource in resources['rows']])
 
     @classmethod
     @coroutine
     def create(cls, user, **kwargs):
+        resource = cls(**kwargs)
+
         if user:
             can_create = yield cls.can_create(user, **kwargs)
+            can_approve = yield resource.can_approve(user, **kwargs)
         else:
             can_create = False
+            can_approve = False
 
         if not can_create:
             err = 'User is not authorised to create this resource'
             raise exceptions.Unauthorized(err)
 
-        resource = cls(**kwargs)
+        # If user can approve resource and has not specified a state, approve on creation
+        if 'state' not in kwargs and can_approve:
+            resource._resource.update({'state': State.approved.name})
+
+        can_set_state = yield resource.validate_state_transition(user, None, resource._resource.get('state'), **kwargs)
+        if not can_set_state:
+            err = [{
+                'field': 'state',
+                'message': 'Cannot set initial state as {}'.format(resource._resource.get('state'))
+            }]
+            raise exceptions.Unauthorized({'errors': err})
+
         yield resource._save()
 
         raise Return(resource)
+
+    @coroutine
+    def validate_state_transition(self, user, start_state, end_state, **kwargs):
+        """
+        Validate whether user can transition resource from start state to end state
+        :param user
+        :param start_state
+        :param end_state
+        :return: bool
+        """
+        if start_state == end_state:
+            raise Return(True)
+
+        transitions = self.state_transitions.get(start_state, [])
+
+        approved_transitions = []
+        can_approve = yield self.can_approve(user, **kwargs)
+        if can_approve:
+            approved_transitions = self.approval_state_transitions.get(start_state, [])
+
+        if end_state not in transitions and end_state not in approved_transitions:
+            raise Return(False)
+
+        raise Return(True)
 
     @coroutine
     def update(self, user, **kwargs):
@@ -188,6 +260,12 @@ class Document(object):
         else:
             can_update = False
             fields = []
+
+        new_state = getattr(State, kwargs.get('state', ''), self.state)
+        can_edit = {self.state, new_state}.intersection(set(self.editable_states))
+        if not can_edit:
+            err = 'User is not authorised to update resource with state {}'.format(new_state.name)
+            raise exceptions.Unauthorized(err)
 
         if not can_update:
             if fields:
@@ -201,13 +279,29 @@ class Document(object):
                 err = 'User is not authorised to update this resource'
                 raise exceptions.Unauthorized(err)
 
-        read_only_fields = set(kwargs.keys()) & set(self._resource.keys()) & self._read_only
+        fields_to_update = set(kwargs.keys()) & set(self._resource.keys())
+
+        state_field_update = fields_to_update & {'state'}
+
+        if state_field_update:
+            can_transition = yield self.validate_state_transition(user, self._resource.get('state'),
+                                                                  kwargs['state'], **kwargs)
+            if not can_transition:
+                err = [{
+                    'field': 'state',
+                    'message': ('Cannot transition from {} state to {} state'
+                                .format(self.state.name, kwargs['state']))
+                }]
+                raise exceptions.Unauthorized({'errors': err})
+
+        read_only_fields = fields_to_update & self._read_only
         if read_only_fields:
             msg = '{} may not be modified'
             errors = [msg.format(x) for x in read_only_fields]
             raise exceptions.ValidationError(errors)
 
         self._resource.update(kwargs)
+
         yield self._save()
 
     @coroutine
@@ -303,6 +397,11 @@ class Document(object):
         raise Return(True)
 
     @coroutine
+    def can_approve(self, user, **data):
+        """Check if a user is authorized to approve a resource"""
+        raise Return(False)
+
+    @coroutine
     def can_update(self, user, **data):
         """Check if a user is authorized to update a resource"""
         raise Return((True, set([])))
@@ -315,7 +414,7 @@ class Document(object):
     @coroutine
     def can_delete(self, user):
         """Check if a user is authorized to delete a resource"""
-        raise Return(True)
+        raise Return(False)
 
     @property
     def state(self):
@@ -327,6 +426,9 @@ class Document(object):
         else:
             return getattr(State, state)
 
+    @state.setter
+    def state(self, value):
+        self._resource['state'] = value
 
 class SubResource(Document):
     _parent = None
@@ -373,6 +475,39 @@ class SubResource(Document):
     def id(self, value):
         self._resource['id'] = value
 
+    @classmethod
+    @coroutine
+    def create(cls, user, **kwargs):
+        """If parent resource is not an editable state, should not be able to create."""
+        parent_id = kwargs.get(cls.parent_resource.resource_type + '_id')
+        try:
+            parent = yield cls.parent_resource.get(parent_id)
+        except couch.NotFound:
+            msg = 'Parent {} with id {} not found'.format(
+                cls.parent_resource.resource_type,
+                parent_id)
+            raise exceptions.ValidationError(msg)
+
+        if not parent.editable:
+            err = 'Cannot create child of {} resource'.format(parent.state.name)
+            raise exceptions.Unauthorized(err)
+
+        resource = yield super(SubResource, cls).create(user, **kwargs)
+        resource._parent = parent
+
+        raise Return(resource)
+
+    @coroutine
+    def update(self, user, **kwargs):
+        """If parent resource is not an editable state, should not be able to update"""
+        yield self.get_parent()
+
+        if not self.parent.editable:
+            err = 'Cannot update child of {} resource'.format(self.parent.state.name)
+            raise exceptions.Unauthorized(err)
+
+        yield super(SubResource, self).update(user, **kwargs)
+
     @coroutine
     def _save(self):
         """Save the sub-resource within the parent resource"""
@@ -390,42 +525,38 @@ class SubResource(Document):
 
     @classmethod
     @coroutine
-    def create(cls, user, **kwargs):
-        resource = yield super(SubResource, cls).create(user, **kwargs)
-        yield resource.get_parent()
-
-        raise Return(resource)
-
-    @coroutine
-    def update(self, user, **kwargs):
-        yield super(SubResource, self).update(user, **kwargs)
-        yield self.get_parent()
-
-    @classmethod
-    @coroutine
-    def get(cls, resource_id):
+    def get(cls, resource_id, include_deactivated=False):
         """
         Get a resource
 
         :param resource_id: the resource ID
+        :param include_deactivated: Include deactivated resources in response
         :returns: a SubResource instance
         :raises: SocketError, CouchException
         """
-        resource = yield cls.view.first(key=resource_id, include_docs=True)
+        if include_deactivated:
+            resource = yield cls.view.first(key=resource_id, include_docs=True)
+        else:
+            resource = yield cls.active_view.first(key=resource_id, include_docs=True)
         parent = cls.parent_resource(**resource['doc'])
 
         raise Return(cls(parent=parent, **resource['value']))
 
     @classmethod
     @coroutine
-    def all(cls):
+    def all(cls, include_deactivated=False):
         """
         Get all sub-resources
+        :param include_deactivated: Include deactivated resources in response
 
         :returns: list of SubResource instances
         :raises: SocketError, CouchException
         """
-        resources = yield cls.view.get(include_docs=True)
+        if include_deactivated:
+            resources = yield cls.view.get(include_docs=True)
+        else:
+            resources = yield cls.active_view.get(include_docs=True)
+
         result = []
 
         for resource in resources['rows']:

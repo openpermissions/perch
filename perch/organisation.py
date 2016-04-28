@@ -98,25 +98,28 @@ class Organisation(Document):
 
         return schema(doc)
 
+    @coroutine
+    def create_default_service(self, user):
+        service = yield Service.create(
+            user,
+            created_by=user.id,
+            name=unicode(uuid.uuid4().hex),
+            service_type='external',
+            organisation_id=self.id
+        )
+        self.services[service.id] = service._resource
+
     @classmethod
     @coroutine
     def create(cls, user, **kwargs):
-        if user.is_admin():
-            kwargs['state'] = State.approved.name
-            organisation = yield super(Organisation, cls).create(user, **kwargs)
-            # create default service
-            service = yield Service.create(
-                user,
-                created_by=user.id,
-                name=unicode(uuid.uuid4().hex),
-                service_type='external',
-                organisation_id=organisation.id
-            )
-            organisation.services[service.id] = service._resource
-        else:
+        if not user.is_admin():
             # Force star rating to be 0 if the user is not an admin
             kwargs['star_rating'] = 0
-            organisation = yield super(Organisation, cls).create(user, **kwargs)
+        organisation = yield super(Organisation, cls).create(user, **kwargs)
+
+        # If organisation is approved on creation, create default service
+        if organisation.state == State.approved:
+            yield organisation.create_default_service(user)
 
         raise Return(organisation)
 
@@ -133,11 +136,12 @@ class Organisation(Document):
 
     @classmethod
     @coroutine
-    def all(cls, state=None):
+    def all(cls, state=None, include_deactivated=False):
         """
         Get all organisations
 
         :param state: State of organisation
+        :param include_deactivated: Flag to include deactivated
         :returns: list of Organisation instances
         :raises: SocketError, CouchException
         """
@@ -146,40 +150,56 @@ class Organisation(Document):
         elif state:
             organisations = yield views.organisations.get(key=state,
                                                           include_docs=True)
-        else:
+        elif include_deactivated:
             organisations = yield views.organisations.get(include_docs=True)
+        else:
+            organisations = yield views.active_organisations.get(include_docs=True)
 
         raise Return([cls(**org['doc']) for org in organisations['rows']])
 
     @classmethod
     @coroutine
-    def user_organisations(cls, user_id, state=None):
+    def user_organisations(cls, user_id, state=None, include_deactivated=False):
         """
         Get organisations that the user has joined
 
         :param user_id: the user ID
         :param state: the user's "join" state
+        :param include_deactivated: Include deactivated resources in response
         :returns: list of Organisation instances
         :raises: SocketError, CouchException
         """
         if state and state not in validators.VALID_STATES:
             raise exceptions.ValidationError('Invalid "state"')
 
-        organisations = yield views.joined_organisations.get(
-            key=[user_id, state], include_docs=True)
+        if include_deactivated:
+            organisations = yield views.joined_organisations.get(
+                key=[user_id, state], include_docs=True)
+        else:
+            organisations = yield views.active_joined_organisations.get(
+                key=[user_id, state], include_docs=True)
 
         raise Return([cls(**org['doc']) for org in organisations['rows']])
+
+    @coroutine
+    def update(self, user, **kwargs):
+        previous_state = self.state
+
+        yield super(Organisation, self).update(user, **kwargs)
+
+        approved = self.state == State.approved
+        was_pending = previous_state == State.pending
+        if approved and was_pending:
+            yield self.create_default_service(user)
 
     @coroutine
     def can_update(self, user, **data):
         """
         Global admin's can always update an organisation.
 
-        Organisation admin's and creators can update if the organisation is
-        approved, but may not update the following fields:
+        Organisation admin's and creators can update, but may not update the following fields:
 
             - star_rating
-            - state
 
         :param user: a User
         :param data: data that the user wants to update
@@ -188,10 +208,10 @@ class Organisation(Document):
         if user.is_admin():
             raise Return((True, set([])))
 
-        org_admin = self.state == State.approved and user.is_org_admin(self.id)
+        org_admin = user.is_org_admin(self.id)
         creator = self.created_by == user.id
         if org_admin or creator:
-            fields = {'star_rating', 'state'} & set(data.keys())
+            fields = {'star_rating'} & set(data.keys())
             if fields:
                 raise Return((False, fields))
             else:
@@ -200,9 +220,15 @@ class Organisation(Document):
         raise Return((False, set([])))
 
     @coroutine
-    def can_delete(self, user):
-        """Must be admin or org admin to delete"""
-        raise Return(user.is_org_admin(self.id))
+    def can_approve(self, user, **data):
+        """
+        Only sys admins can approve an organisation
+        :param user: a User
+        :param data: data that the user wants to update
+        """
+        is_admin = user.is_admin()
+        raise Return(is_admin)
+
 
 all_permission_schema = Schema({
     'type': 'all',
@@ -266,12 +292,8 @@ service_name_length = Length(min=options.min_length_service_name,
 
 
 def validate_service_schema(v):
-    if v['service_type'] == 'external':
-        v['state'] = State.approved.name
-    else:
-        if 'location' not in v:
-            raise Invalid('location is required')
-
+    if v['service_type'] != 'external' and 'location' not in v:
+        raise Invalid('location is required')
     return v
 
 
@@ -281,6 +303,7 @@ class Service(SubResource):
     parent_key = 'services'
     read_only_fields = ['created_by']
     view = views.services
+    active_view = views.active_services
 
     default_permission = [{'type': 'all', 'value': None, 'permission': 'rw'}]
     schema = MetaSchema({
@@ -334,36 +357,41 @@ class Service(SubResource):
 
     @classmethod
     @coroutine
-    def get_by_location(cls, location):
+    def get_by_location(cls, location, include_deactivated=False):
         """Get a service by it's location"""
-        result = yield views.service_location.first(key=location)
+        if include_deactivated:
+            result = yield views.service_location.first(key=location)
+        else:
+            result = yield views.active_service_location.first(key=location)
         raise Return(cls(**result['value']))
 
     @classmethod
     @coroutine
-    def all(cls, service_type=None, organisation_id=None):
+    def all(cls, service_type=None, organisation_id=None, include_deactivated=False):
         """
         Get all resources
+
+        :param service_type: Filter by service type
+        :param organisation_id: Filter by organisation id
+        :param include_deactivated: Flag to include deactivated Services
 
         :returns: list of Resource instances
         :raises: SocketError, CouchException
         """
-        resources = yield cls.view.get(key=[service_type, organisation_id])
+        if include_deactivated:
+            resources = yield views.services.get(key=[service_type, organisation_id])
+        else:
+            resources = yield views.active_services.get(key=[service_type, organisation_id])
+
         # TODO: shouldn't this include the doc as the parent?
         raise Return([cls(**resource['value']) for resource in resources['rows']])
 
     @classmethod
     @coroutine
     def create(cls, user, **kwargs):
-        is_external = kwargs.get('service_type') == 'external'
-        is_org_admin = user.is_org_admin(kwargs.get('organisation_id'))
-        if is_org_admin or is_external:
-            kwargs['state'] = State.approved.name
-        else:
-            kwargs['state'] = State.pending.name
-
         resource = yield super(Service, cls).create(user, **kwargs)
 
+        # If service is approved on creation, create secret for service
         if resource.state == State.approved:
             yield OAuthSecret.create(user, client_id=resource.id)
 
@@ -387,8 +415,18 @@ class Service(SubResource):
                 yield OAuthSecret.create(user, client_id=self.id)
 
     @coroutine
+    def can_approve(self, user, **data):
+        """
+        Only sys admins can approve a service
+        :param user: a User
+        :param data: data that the user wants to update
+        """
+        is_external = data.get('service_type', self.service_type) == 'external'
+        raise Return(user.is_admin() or is_external)
+
+    @coroutine
     def can_update(self, user, **kwargs):
-        """Users may not update state or service_type"""
+        """Org admins may not update organisation_id or service_type"""
         if user.is_admin():
             raise Return((True, set([])))
 
@@ -396,16 +434,11 @@ class Service(SubResource):
         if not (user.is_org_admin(self.organisation_id) or is_creator):
             raise Return((False, set([])))
 
-        fields = {'state', 'service_type', 'organisation_id'} & set(kwargs.keys())
+        fields = ({'service_type', 'organisation_id'} & set(kwargs.keys()))
         if fields:
             raise Return((False, fields))
         else:
             raise Return((True, set([])))
-
-    @coroutine
-    def can_delete(self, user):
-        """Must be admin or org admin to delete"""
-        raise Return(user.is_org_admin(self.organisation_id))
 
     @classmethod
     @coroutine
@@ -456,6 +489,23 @@ class Repository(SubResource):
     parent_key = 'repositories'
     read_only_fields = ['created_by']
     view = views.repositories
+    active_view = views.active_repositories
+
+    # State transitions for repositories overridden so that:
+    # - Cannot deactivate an approved repository
+    # - Repository can move from approved to pending when moved to a new repository service
+    approval_state_transitions = {
+        None: [State.approved.name],
+        State.pending.name: [State.approved.name, State.rejected.name]
+    }
+
+    state_transitions = {
+        None: [State.pending.name],
+        State.pending.name: [State.deactivated.name],
+        State.approved.name: [State.pending.name],
+        State.rejected.name: [State.deactivated.name],
+        State.deactivated.name: [State.pending.name]
+    }
 
     _repository_name_length = Length(min=options.min_length_repository_name,
                                      max=options.max_length_repository_name)
@@ -548,27 +598,41 @@ class Repository(SubResource):
     def update(self, user, **kwargs):
         service_id = kwargs.get('service_id')
         if service_id:
-            try:
-                service = yield Service.get(service_id)
-                if not (service.organisation_id == self.organisation_id or
-                        user.is_org_admin(service.organisation_id)):
-                    kwargs['state'] = State.pending.name
-            except couch.NotFound:
-                pass
+            can_approve = yield self.can_approve(user, **kwargs)
+            if not can_approve:
+                kwargs['state'] = State.pending.name
 
         yield super(Repository, self).update(user, **kwargs)
+
+    @coroutine
+    def can_approve(self, user, **data):
+        """
+        Admins of repository service or sys admins can approve a repository
+        :param user: a User
+        :param data: data that the user wants to update
+        """
+        service_id = data.get('service_id', self.service_id)
+
+        try:
+            service = yield Service.get(service_id)
+
+            is_repo_admin = user.is_org_admin(service.organisation_id)
+            raise Return(is_repo_admin)
+        except couch.NotFound:
+            pass
+
+        raise Return(False)
 
     @coroutine
     def can_update(self, user, **kwargs):
         """
         Global admin's can change anything
 
-        If the user is an organiastion administrator or created the repository,
-        they may change any field other than "state" and "organisation_id"
+        If the user is an organisation administrator or created the repository,
+        they may change any field other than "organisation_id"
 
         If the user is a service administrator the user may change the "state"
-        but no other fields. If the service is not approved then a
-        repository may not be added to it.
+        but no other fields.
         """
         if user.is_admin():
             raise Return((True, set([])))
@@ -579,12 +643,6 @@ class Repository(SubResource):
             if 'organisation_id' in kwargs:
                 fields.add('organisation_id')
 
-            if 'state' in kwargs:
-                updating_service = ('service_id' in kwargs
-                                    and kwargs['state'] == State.pending.name)
-                if not updating_service:
-                    fields.add('state')
-
             if fields:
                 raise Return((False, fields))
             else:
@@ -593,13 +651,12 @@ class Repository(SubResource):
         try:
             service = yield Service.get(self.service_id)
 
-            if service.state != State.approved:
-                raise Return((False, {'service_id'}))
-
             if user.is_org_admin(service.organisation_id):
                 fields = set(kwargs) - {'state'}
                 if fields:
                     raise Return((False, fields))
+                else:
+                    raise Return((True, fields))
         except couch.NotFound:
             # will be handled in Repository.validate
             pass
@@ -608,37 +665,8 @@ class Repository(SubResource):
 
     @classmethod
     @coroutine
-    def create(cls, user, **kwargs):
-        service_id = kwargs.get('service_id')
-        if service_id:
-            try:
-                service = yield Service.get(service_id)
-                if user.is_org_admin(service.organisation_id):
-                    kwargs['state'] = State.approved.name
-            except couch.NotFound:
-                # handled later
-                pass
-
-        resource = yield super(Repository, cls).create(user, **kwargs)
-        raise Return(resource)
-
-    @classmethod
-    @coroutine
     def can_create(cls, user, **kwargs):
         return user.is_user(kwargs.get('organisation_id'))
-
-    @coroutine
-    def can_delete(self, user):
-        """
-        Approved repositories cannot be deleted
-
-        Must be admin or org admin to delete
-        """
-        if self.state == State.approved:
-            raise Return(False)
-
-        can_delete, _ = yield self.can_update(user)
-        raise Return(can_delete)
 
     @coroutine
     def with_relations(self, user=None):
@@ -689,7 +717,7 @@ def generate_secret(length=30):
 class OAuthSecret(Document):
     db_name = 'registry'
     resource_type = 'oauth_client_credentials'
-    view = views.oauth_secrets
+    view = active_view = views.oauth_secrets
 
     schema = Schema({
         Required('_id', default=generate_secret): unicode,

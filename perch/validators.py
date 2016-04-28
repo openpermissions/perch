@@ -100,13 +100,20 @@ def validate_url(url):
 
 
 VALID_STATES = {x.name for x in State}
+VALID_USER_STATES = {x.name for x in [State.approved, State.deactivated]}
 
 
 def validate_state(state):
+    return _validate_state(state, VALID_STATES)
+
+def validate_user_state(state):
+    return _validate_state(state, VALID_USER_STATES)
+
+def _validate_state(state, valid_states):
     """Validate a state string"""
     if state in State:
         return state.name
-    elif state in VALID_STATES:
+    elif state in valid_states:
         return state
     else:
         raise Invalid('Invalid state')

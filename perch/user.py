@@ -35,10 +35,24 @@ define('token_ttl', default=86400)
 class User(Document):
     resource_type = 'user'
     view = views.users
+    active_view = views.active_users
     db_name = 'registry'
     internal_fields = (Document.internal_fields +
                        ['password', 'verification_hash'])
     read_only_fields = ['created_by']
+
+    default_state = State.approved
+    editable_states = [State.approved]
+
+    # State transitions for users overridden so that:
+    # - Only valid states are approved and deactivated
+    # - Once user is deactivated cannot be reactivated
+    approval_state_transitions = {}
+
+    state_transitions = {
+        None: [State.approved.name],
+        State.approved.name: [State.deactivated.name]
+    }
 
     class roles(Enum):
         administrator = 'administrator'
@@ -72,6 +86,7 @@ class User(Document):
             Required('has_agreed_to_terms'): True,
             Required('organisations', default=default_global): orgs_schema,
             Required('verified', default=False): bool,
+            Required('state', default=User.default_state.name): validators.validate_user_state,
             'first_name': unicode,
             'last_name': unicode,
             'phone': unicode,
@@ -80,6 +95,14 @@ class User(Document):
         })
 
         return schema(doc)
+
+    @coroutine
+    def can_update(self, user, **kwargs):
+        # Can only update if admin or user being updated
+        if not (user.id == self.id or user.is_admin()):
+            raise Return((False, set([])))
+
+        raise Return((True, set([])))
 
     @coroutine
     def check_unique(self):
@@ -220,11 +243,6 @@ class User(Document):
 
         return user_role == role.value and state == State.approved.name
 
-    @coroutine
-    def can_delete(self, user):
-        """Admin or user can delete a user"""
-        raise Return(user.id == self.id or user.is_admin())
-
     @classmethod
     @coroutine
     def remove_organisation_from_all(cls, organisation_id):
@@ -233,7 +251,7 @@ class User(Document):
                                                      include_docs=True)
         users = [x['doc'] for x in users['rows']]
         for user in users:
-            del user['organisations'][organisation_id]
+            user['organisations'][organisation_id]['state'] = State.deactivated.name
 
         db = cls.db_client()
         yield db.save_docs(users)
@@ -282,7 +300,9 @@ class UserOrganisation(SubResource):
     parent_resource = User
     parent_key = 'organisations'
     view = views.user_organisations_resource
+    active_view = views.active_user_organisations_resource
     internal_fields = ['id', 'user_id']
+    editable_states = [State.approved]
 
     schema = Schema({
         'id': unicode,
@@ -295,23 +315,24 @@ class UserOrganisation(SubResource):
     def organisation_id(self):
         return self.id
 
-    @classmethod
     @coroutine
-    def can_create(cls, user, **kwargs):
-        if 'state' in kwargs:
-            if not user.is_admin() and kwargs['state'] != cls.default_state.name:
-                raise Return(False)
-
-        raise Return(True)
+    def can_approve(self, user, **data):
+        """
+        Only org admins can approve joining an organisation
+        :param user: a User
+        :param data: data that the user wants to update
+        """
+        is_org_admin = user.is_org_admin(self.organisation_id)
+        raise Return(is_org_admin)
 
     @coroutine
     def can_update(self, user, **kwargs):
-        raise Return((user.is_org_admin(self.organisation_id), []))
+        # Can only update if org admin or user being updated
+        if not (user.id == self.user_id or user.is_org_admin(self.organisation_id)):
+            raise Return((False, set([])))
 
-    @coroutine
-    def can_delete(self, user, **kwargs):
-        if not (user.is_org_admin(self.organisation_id)
-                or user.id == self.user_id):
-            raise Return(False)
+        if 'role' in kwargs:
+            if not user.is_org_admin(self.organisation_id):
+                raise Return((False, {'role'}))
 
-        raise Return(True)
+        raise Return((True, set([])))
