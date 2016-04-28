@@ -95,7 +95,7 @@ class Document(object):
             if self._resource.get(attr):
                 return self._resource[attr]
             else:
-                defaults = self.get_required_fields_with_defaults(self.schema)
+                defaults = self.get_required_fields_with_defaults()
                 return defaults[attr]
         except KeyError:
             raise AttributeError(attr)
@@ -149,10 +149,10 @@ class Document(object):
 
         yield self.check_unique()
 
-    @classmethod
-    def get_required_fields_with_defaults(cls, schema):
+    def get_required_fields_with_defaults(self):
         defaults = {}
-        required_keys = set(key for key in schema.schema if isinstance(key, Required))
+        required_keys = set(
+            key for key in self.schema.schema if isinstance(key, Required))
         for key in required_keys:
             if not isinstance(key.default, Undefined):
                 defaults[unicode(key)] = key.default()

@@ -18,8 +18,9 @@ from operator import itemgetter
 import couch
 from tornado.gen import coroutine, Return
 from tornado.options import options, define
-from voluptuous import (All, Any, Extra, In, Invalid, Length, MultipleInvalid,
-                        Range, Required, Schema, ALLOW_EXTRA)
+from voluptuous import (
+    All, Any, Extra, In, Invalid, Length,
+    MultipleInvalid, Range, Required, Schema)
 
 from . import views, exceptions, validators
 from .model import format_error, Document, SubResource, State
@@ -55,7 +56,7 @@ class Organisation(Document):
     read_only_fields = ['created_by']
 
     @property
-    def schema(cls):
+    def schema(self):
         name_length = Length(min=options.min_length_organisation_name,
                              max=options.max_length_organisation_name)
 
@@ -63,9 +64,9 @@ class Organisation(Document):
 
         schema = Schema({
             Required('name'): All(unicode, name_length),
-            Required('state', default=cls.default_state.name): validators.validate_state,
+            Required('state', default=self.default_state.name): validators.validate_state,
             Required('created_by'): unicode,
-            Required('type', default=cls.resource_type): cls.resource_type,
+            Required('type', default=self.resource_type): self.resource_type,
             Required('star_rating', default=0): Range(0, 5),
             Required('services', default={}): {
                 Extra: partial_schema(Service.schema, filtered_fields)
