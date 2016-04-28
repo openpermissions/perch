@@ -18,7 +18,7 @@ if not version:
     raise RuntimeError('Cannot find version information')
 
 setup(
-    name='perch',
+    name='opp-perch',
     version=version,
     description='Open Permissions Platform Couchdb Library',
     author='Open Permissions Platform Coalition',
