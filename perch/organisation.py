@@ -37,7 +37,6 @@ define('max_length_repository_name', default=512)
 
 SERVICE_TYPES = {
     'external',
-    'authentication',
     'identity',
     'index',
     'onboarding',
