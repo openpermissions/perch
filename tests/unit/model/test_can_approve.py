@@ -106,6 +106,7 @@ class TestService():
         user = User(**u)
         func = partial(service.can_approve, user)
         result = IOLoop.instance().run_sync(func)
+        # External services should always be approvable
         assert result is True
 
     @pytest.mark.parametrize("org_info,expected", global_joins)
@@ -116,6 +117,7 @@ class TestService():
         user = User(**u)
         func = partial(service.can_approve, user, service_type='external')
         result = IOLoop.instance().run_sync(func)
+        # External services should always be approvable
         assert result is True
 
     @pytest.mark.parametrize("org_info,expected", global_joins)
