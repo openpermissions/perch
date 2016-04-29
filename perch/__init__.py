@@ -12,7 +12,7 @@ from .model import *
 from .user import *
 from .organisation import *
 
-__version__ = '0.15.1'
+__version__ = '0.15.2'
 
 define('db_port', default=5984)
 define('url_registry_db', default='http://localhost')
