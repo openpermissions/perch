@@ -85,7 +85,6 @@ class Document(object):
         State.deactivated.name: [State.approved.name],
     }
 
-
     def __init__(self, **kwargs):
         self._resource = deepcopy(kwargs)
         self._resource['type'] = self.resource_type
