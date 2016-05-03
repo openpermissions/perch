@@ -684,17 +684,13 @@ class Repository(SubResource):
             repository['organisation'] = {'id': self.parent_id}
 
         service_id = self.service_id
-        organisation_services = getattr(parent, Service.parent_key, {})
-        if service_id in organisation_services:
-            repository['service'] = organisation_services[service_id]
-        else:
-            try:
-                # TODO: cache this lookup
-                service = yield Service.get(service_id)
-                repository['service'] = service.clean(user=user)
-            except couch.NotFound:
-                # just include the service ID if cannot find the service
-                repository['service'] = {'id': service_id}
+        try:
+            # TODO: cache this lookup
+            service = yield Service.get(service_id)
+            repository['service'] = service.clean(user=user)
+        except couch.NotFound:
+            # just include the service ID if cannot find the service
+            repository['service'] = {'id': service_id}
 
         del repository['service_id']
         del repository['organisation_id']
