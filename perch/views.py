@@ -263,18 +263,14 @@ def organisation_name(doc):
         yield doc.get('name'), doc['_id']
 
 
-@view('registry', '1.0.1')
+@view('registry', '1.0.2')
 def reference_links(doc):
     """Get reference links"""
     if doc.get('type') == 'organisation' and doc.get('state') != 'deactivated':
         for asset_id_type, link in doc.get('reference_links', {}).items():
-            # TODO: The API expects this data structure, but we should change
-            # it because there is always only one entry in "links".
             value = {
                 'organisation_id': doc['_id'],
-                'links': {
-                    asset_id_type: link
-                }
+                'link': link
             }
             yield asset_id_type, value
 
