@@ -206,3 +206,25 @@ class ChangePassword(AsyncTestCase):
             yield user.change_password('password2', 'password3')
 
 
+class CheckUserDefaults(AsyncTestCase):
+    @gen_test
+    def test_get_user_defaults(self):
+        user = User(password='password', id='uid')
+        assert user.type == 'user'
+        assert user.organisations == {'global': {'role': 'user', 'state': 'approved'}}
+        assert not user.verified
+        assert user.state.name == 'approved'
+
+    @gen_test
+    def test_get_required_fields_with_defaults(self):
+        test_user = User(password='password', id='uid')
+        expected_org_defaults = {
+            'verified': False,
+            'state': 'approved',
+            'type': 'user',
+            'organisations': {
+                'global': {'state': 'approved', 'role': 'user'}
+            }
+        }
+        returned_defaults = test_user.get_required_fields_with_defaults()
+        assert expected_org_defaults == returned_defaults
