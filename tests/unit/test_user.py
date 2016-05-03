@@ -1,23 +1,26 @@
 # -*- coding: utf-8 -*-
 # Copyright 2016 Open Permissions Platform Coalition
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License. You may obtain a copy of the License at
-# http://www.apache.org/licenses/LICENSE-2.0
-# Unless required by applicable law or agreed to in writing, software distributed under the License is
-# distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and limitations under the License.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy of
+# the License at http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 from __future__ import unicode_literals
-from copy import deepcopy
 
-import couch
 import pytest
 from mock import patch
 from tornado.testing import AsyncTestCase, gen_test
 
-from perch import exceptions, Organisation, Token, User
+from perch import exceptions, Token, User
 from perch.model import State
-from .util import make_future, return_fake_future, patch_db
+from .util import make_future, patch_db, patch_view
 
 USERS = [
     {
@@ -42,21 +45,8 @@ USERS = [
 ]
 
 UNVERIFIED_USER = USERS[-1]
-USERS_VIEW = {k: {'doc': user, 'value': v}
-              for user in USERS for k, v in User.view(user)}
 
-
-@return_fake_future
-def fake_users(key=None, **kwargs):
-    if key is None:
-        return {'rows': USERS_VIEW.values()}
-    else:
-        try:
-            return {'rows': [USERS_VIEW[key]]}
-        except KeyError:
-            return {'rows': []}
-
-patched_get = patch.object(User.view, 'get', fake_users)
+patched_get = patch_view(User.view, USERS)
 
 
 class CreateUser(AsyncTestCase):

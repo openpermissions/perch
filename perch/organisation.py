@@ -360,10 +360,14 @@ class Service(SubResource):
     def get_by_location(cls, location, include_deactivated=False):
         """Get a service by it's location"""
         if include_deactivated:
-            result = yield views.service_location.first(key=location)
+            view = views.service_location
         else:
-            result = yield views.active_service_location.first(key=location)
-        raise Return(cls(**result['value']))
+            view = views.active_service_location
+
+        result = yield view.first(key=location, include_docs=True)
+        parent = cls.parent_resource(**result['doc'])
+
+        raise Return(cls(parent=parent, **result['value']))
 
     @classmethod
     @coroutine
