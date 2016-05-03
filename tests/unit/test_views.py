@@ -14,6 +14,38 @@
 from perch import views
 
 
+def test_reference_links_view():
+    doc = {
+        '_id': 'org1',
+        'type': 'organisation',
+        'state': 'approved',
+        'reference_links': {
+            'source_id_type1': 'https://example.com',
+            'source_id_type2': 'https://example2.com'
+        }
+    }
+    results = sorted([x for x in views.reference_links(doc)])
+    expected = [
+        ('source_id_type1', {'organisation_id': 'org1', 'link': 'https://example.com'}),
+        ('source_id_type2', {'organisation_id': 'org1', 'link': 'https://example2.com'}),
+    ]
+    assert results == expected
+
+def test_reference_links_deactivated_view():
+    doc = {
+        '_id': 'org1',
+        'type': 'organisation',
+        'state': 'deactivated',
+        'reference_links': {
+            'source_id_type1': 'https://example.com',
+            'source_id_type2': 'https://example2.com'
+        }
+    }
+    results = sorted([x for x in views.reference_links(doc)])
+    expected = []
+    assert results == expected
+
+
 def test_service_and_repository_view():
     doc = {
         '_id': 'org1',
