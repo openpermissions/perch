@@ -91,7 +91,7 @@ class Document(object):
 
     def __getattr__(self, attr):
         try:
-            if self._resource.get(attr):
+            if attr in self._resource:
                 return self._resource[attr]
             else:
                 defaults = self.get_required_fields_with_defaults()
