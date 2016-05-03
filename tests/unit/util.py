@@ -52,3 +52,39 @@ def patch_db(resource):
     patched = patch.object(resource, 'db_client', return_value=db_client)
 
     return patched
+
+
+def patch_view(view, docs):
+    def view_result(doc, key, value, include_docs=False):
+        result = {
+            'id': doc['_id'],
+            'key': key,
+            'value': value
+        }
+
+        if include_docs:
+            result['doc'] = doc
+
+        return result
+
+    with_doc = {k: view_result(doc, k, v, True)
+                for doc in docs for k, v in view.func(doc)}
+    without_doc = {k: view_result(doc, k, v, False)
+                   for doc in docs for k, v in view.func(doc)}
+
+    @return_fake_future
+    def fake_view(key=None, include_docs=False, **kwargs):
+        if include_docs:
+            data = with_doc
+        else:
+            data = without_doc
+
+        if key is None:
+            return {'rows': data.values()}
+        else:
+            try:
+                return {'rows': [data[key]]}
+            except KeyError:
+                return {'rows': []}
+
+    return patch.object(view, 'get', fake_view)
