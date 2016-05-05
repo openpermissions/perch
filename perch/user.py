@@ -126,6 +126,36 @@ class User(Document):
 
         raise Return(resource)
 
+    @classmethod
+    @coroutine
+    def create_admin(cls, email, password, **kwargs):
+        """
+        Create an approved 'global' administrator
+
+        :param email: the user's email address
+        :param password: the user's plain text password
+        :returns: a User
+        """
+        data = {
+            'email': email,
+            'password': cls.hash_password(password),
+            'verified': True,
+            'has_agreed_to_terms': True,
+            'state': State.approved,
+            'organisations': {
+                GLOBAL: {
+                    'state': State.approved,
+                    'role': cls.roles.administrator.value
+                }
+            }
+        }
+        data.update(**kwargs)
+
+        user = cls(**data)
+        yield user._save()
+
+        raise Return(user)
+
     @staticmethod
     def hash_password(plain_text):
         """Hash a plain text password"""

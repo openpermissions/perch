@@ -68,10 +68,29 @@ class CreateUser(AsyncTestCase):
 
             assert user._save.call_count == 1
 
+    @patch_db(User)
     @gen_test
-    def test_create_user_invalid_password(self):
-        # TODO
-        pass
+    def test_create_user_invalid_password(self, db_client):
+        with pytest.raises(exceptions.ValidationError):
+            yield User.create(User(), 'p')
+
+    @patch_db(User)
+    @gen_test
+    def test_create_admin_user(self, db_client):
+        user = yield User.create_admin('me@mail.test',
+                                       'password',
+                                       first_name='test',
+                                       last_name='user')
+
+        assert user.first_name == 'test'
+        assert user.last_name == 'user'
+        assert user.verify_password('password')
+        assert user.state == State.approved
+        assert user.verified
+        assert user.is_admin()
+
+        assert db_client().save_doc.call_count == 1
+        assert db_client().save_doc.call_args[0][0] == user._resource
 
 
 class Login(AsyncTestCase):
