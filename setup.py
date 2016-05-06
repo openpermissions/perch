@@ -22,7 +22,7 @@ setup(
     version=version,
     description='Open Permissions Platform Couchdb Library',
     author='Open Permissions Platform Coalition',
-    author_email='support-copyrighthub@cde.catapult.org.uk',
+    author_email='support@openpermissions.org',
     url='https://github.com/openpermissions/perch',
     packages=['perch'],
     install_requires=["tornado-couchdb==0.2.3",
