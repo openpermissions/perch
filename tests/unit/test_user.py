@@ -224,7 +224,8 @@ class CheckUserDefaults(AsyncTestCase):
     def test_get_user_defaults(self):
         user = User(password='password', id='uid')
         assert user.type == 'user'
-        assert user.organisations == {'global': {'role': 'user', 'state': 'approved'}}
+        assert user.organisations == {}
+        assert user.role == 'user'
         assert not user.verified
         assert user.state.name == 'approved'
 
@@ -234,10 +235,74 @@ class CheckUserDefaults(AsyncTestCase):
         expected_org_defaults = {
             'verified': False,
             'state': 'approved',
+            'role': 'user',
             'type': 'user',
-            'organisations': {
-                'global': {'state': 'approved', 'role': 'user'}
-            }
+            'organisations': {}
         }
         returned_defaults = test_user.get_required_fields_with_defaults()
         assert expected_org_defaults == returned_defaults
+
+
+class IsAdmin(AsyncTestCase):
+    def test_is_admin(self):
+        user = User(password='password', role='administrator', id='uid')
+        result = user.is_admin()
+        assert result is True
+
+    def test_is_not_admin(self):
+        user = User(password='password', role='user', id='uid')
+        result = user.is_admin()
+        assert result is False
+
+    def test_is_deactivated(self):
+        user = User(password='password', role='administrator', state='deactivated', id='uid')
+        result = user.is_admin()
+        assert result is False
+
+
+class CanUpdate(AsyncTestCase):
+    @gen_test
+    def test_current_user(self):
+        user = User(password='password', id='uid')
+
+        result = yield user.can_update(user, first_name='TestName')
+        assert result == (True, set([]))
+
+    @gen_test
+    def test_sys_admin(self):
+        user_to_update = User(password='password', id='uid2')
+        user_doing_update = User(password='password', role='administrator', id='uid')
+
+        result = yield user_to_update.can_update(user_doing_update, first_name='TestName')
+        assert result == (True, set([]))
+
+    @gen_test
+    def test_other_user(self):
+        user_to_update = User(password='password', id='uid2')
+        user_doing_update = User(password='password', id='uid')
+
+        result = yield user_to_update.can_update(user_doing_update, first_name='TestName')
+        assert result == (False, set([]))
+
+    @gen_test
+    def test_current_user_role(self):
+        user = User(password='password', id='uid')
+
+        result = yield user.can_update(user, first_name='TestName', role='administrator')
+        assert result == (False, {'role'})
+
+    @gen_test
+    def test_sys_admin_role(self):
+        user_to_update = User(password='password', id='uid2')
+        user_doing_update = User(password='password', role='administrator', id='uid')
+
+        result = yield user_to_update.can_update(user_doing_update, first_name='TestName', role='administrator')
+        assert result == (True, set([]))
+
+    @gen_test
+    def test_other_user_role(self):
+        user_to_update = User(password='password', id='uid2')
+        user_doing_update = User(password='password', id='uid')
+
+        result = yield user_to_update.can_update(user_doing_update, first_name='TestName')
+        assert result == (False, set([]))

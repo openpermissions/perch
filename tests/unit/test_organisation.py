@@ -61,8 +61,7 @@ class CreateOrganisation(AsyncTestCase):
 
     @gen_test
     def test_create_organisation_as_admin(self):
-        orgs = {'global': {'state': 'approved', 'role': 'administrator'}}
-        user = User(password='password', organisations=orgs, id='uid')
+        user = User(password='password', role='administrator', id='uid')
         with patch.object(Organisation, '_save', return_value=make_future(None)):
             with patch.object(Service, 'create', return_value=make_future(Service())):
                 org = yield Organisation.create(user,

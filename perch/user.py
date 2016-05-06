@@ -25,8 +25,6 @@ from .model import Document, SubResource, State
 
 __all__ = ['User', 'UserOrganisation', 'Token']
 
-GLOBAL = 'global'
-
 define('min_length_password', default=3)
 define('max_length_password', default=128)
 define('token_ttl', default=86400)
@@ -61,12 +59,6 @@ class User(Document):
 
     @property
     def schema(cls):
-        default_global = {
-            GLOBAL: {
-                'state': State.approved.name,
-                'role': cls.roles.default.value
-            }
-        }
         orgs_schema = Schema({
             Extra: {
                 'state': validators.validate_state,
@@ -85,9 +77,10 @@ class User(Document):
             Required('email'): validators.valid_email,
             Required('password'): All(unicode, password_length),
             Required('has_agreed_to_terms'): True,
-            Required('organisations', default=default_global): orgs_schema,
+            Required('organisations', default={}): orgs_schema,
             Required('verified', default=False): bool,
             Required('state', default=User.default_state.name): validators.validate_user_state,
+            Required('role', default=User.roles.default.value): In([x.value for x in User.roles]),
             'first_name': unicode,
             'last_name': unicode,
             'phone': unicode,
@@ -99,11 +92,20 @@ class User(Document):
 
     @coroutine
     def can_update(self, user, **kwargs):
-        # Can only update if admin or user being updated
-        if not (user.id == self.id or user.is_admin()):
-            raise Return((False, set([])))
+        # Sys admin can update everything
+        if user.is_admin():
+            raise Return((True, set([])))
 
-        raise Return((True, set([])))
+        # If user being updated can update everything apart from role
+        if user.id == self.id:
+            fields = ({'role'} & set(kwargs.keys()))
+            if fields:
+                raise Return((False, fields))
+            else:
+                raise Return((True, set([])))
+
+        # Otherwise, cannot update
+        raise Return((False, set([])))
 
     @coroutine
     def check_unique(self):
@@ -247,8 +249,8 @@ class User(Document):
         raise Return(user)
 
     def is_admin(self):
-        """Is the user a "global" administrator"""
-        return self._has_role('global', self.roles.administrator)
+        """Is the user a system administrator"""
+        return self.role == self.roles.administrator.value and self.state == State.approved
 
     def is_org_admin(self, organisation_id):
         """Is the user authorized to administrate the organisation"""

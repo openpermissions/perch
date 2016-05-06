@@ -197,7 +197,7 @@ class Organisation(Document):
     @coroutine
     def can_update(self, user, **data):
         """
-        Global admins can always update an organisation.
+        Sys admins can always update an organisation.
 
         Organisation admins and creators can update, but may not update the following fields:
 
@@ -632,7 +632,7 @@ class Repository(SubResource):
     @coroutine
     def can_update(self, user, **kwargs):
         """
-        Global admin's can change anything
+        Sys admin's can change anything
 
         If the user is an organisation administrator or created the repository,
         they may change any field other than "organisation_id"
