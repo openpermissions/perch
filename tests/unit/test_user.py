@@ -50,23 +50,26 @@ patched_get = patch_view(User.view, USERS)
 
 
 class CreateUser(AsyncTestCase):
+    @patch_view(User.view, [])
+    @patch_db(User)
     @gen_test
-    def test_create_user(self):
-        with patch.object(User, '_save', return_value=make_future(None)):
-            user = yield User.create(User(),
-                                     'password',
-                                     first_name='test',
-                                     last_name='user')
+    def test_create_user(self, db_client):
+        user = yield User.create(User(),
+                                 'password',
+                                 email='me@mail.test',
+                                 first_name='test',
+                                 last_name='user',
+                                 has_agreed_to_terms=True)
 
-            assert user.first_name == 'test'
-            assert user.last_name == 'user'
-            assert user.password != 'password'
-            assert user.verify_password('password')
-            assert user.state == State.approved
-            assert not user.verified
-            assert user.verification_hash
+        assert user.first_name == 'test'
+        assert user.last_name == 'user'
+        assert user.password != 'password'
+        assert user.verify_password('password')
+        assert user.state == State.approved
+        assert not user.verified
+        assert user.verification_hash
 
-            assert user._save.call_count == 1
+        assert db_client().save_doc.call_count == 1
 
     @patch_db(User)
     @gen_test
@@ -74,6 +77,7 @@ class CreateUser(AsyncTestCase):
         with pytest.raises(exceptions.ValidationError):
             yield User.create(User(), 'p')
 
+    @patch_view(User.view, [])
     @patch_db(User)
     @gen_test
     def test_create_admin_user(self, db_client):
