@@ -10,6 +10,7 @@
 """Voluptuous validotor functions"""
 import re
 from urlparse import urlsplit
+from collections import defaultdict
 
 from voluptuous import AllInvalid, Invalid, Schema, ALLOW_EXTRA
 
@@ -99,6 +100,44 @@ def validate_url(url):
     return url
 
 
+def validate_reference_links(reference_links):
+    """
+    Vaidate reference links data structure
+
+    Expected data structure:
+        {
+            "links": {
+                id_type1: url1,
+                id_type2: url2
+            },
+            "redirect_id_type": id_type1 | id1_type2
+        }
+
+    where links is an optional key but must be a dictionary with id types to
+    URLs if it exists, and redirect_id_type is optional but if it exists,
+    it must point to one of the existing id types in the links object. It is
+    used to set a default redirect URL that is used by the resolution service.
+    """
+    validated_reference_links = defaultdict(dict)
+    redirect_id_type = reference_links.get('redirect_id_type')
+    links = reference_links.get('links')
+
+    if redirect_id_type:
+        if 'links' not in reference_links:
+            raise Invalid('Expected key links in reference_links')
+        elif not isinstance(links, dict):
+            raise Invalid('Expected links in reference_links to be an object')
+        elif redirect_id_type not in links:
+            raise Invalid('Redirect ID type must point to one of the links\' ID types')
+        validated_reference_links['redirect_id_type'] = redirect_id_type
+
+    if links:
+        for id_type, url in links.items():
+            validated_reference_links['links'][id_type] = validate_url(url)
+
+    return validated_reference_links
+
+
 VALID_STATES = {x.name for x in State}
 VALID_USER_STATES = {x.name for x in [State.approved, State.deactivated]}
 
@@ -106,8 +145,10 @@ VALID_USER_STATES = {x.name for x in [State.approved, State.deactivated]}
 def validate_state(state):
     return _validate_state(state, VALID_STATES)
 
+
 def validate_user_state(state):
     return _validate_state(state, VALID_USER_STATES)
+
 
 def _validate_state(state, valid_states):
     """Validate a state string"""
