@@ -263,11 +263,11 @@ def organisation_name(doc):
         yield doc.get('name'), doc['_id']
 
 
-@view('registry', '1.0.2')
+@view('registry', '1.0.3')
 def reference_links(doc):
     """Get reference links"""
     if doc.get('type') == 'organisation' and doc.get('state') != 'deactivated':
-        for asset_id_type, link in doc.get('reference_links', {}).items():
+        for asset_id_type, link in doc.get('reference_links', {}).get('links', {}).items():
             value = {
                 'organisation_id': doc['_id'],
                 'link': link

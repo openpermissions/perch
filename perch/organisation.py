@@ -88,7 +88,7 @@ class Organisation(Document):
             'youtube': unicode,
             'linkedin': unicode,
             'myspace': unicode,
-            'reference_links': {Extra: validators.validate_url},
+            'reference_links': validators.validate_reference_links,
             'logo': Any(validators.validate_url, '', None),
             'modal_header_text': unicode,
             'modal_footer_text': unicode,
@@ -115,6 +115,7 @@ class Organisation(Document):
         if not user.is_admin():
             # Force star rating to be 0 if the user is not an admin
             kwargs['star_rating'] = 0
+
         organisation = yield super(Organisation, cls).create(user, **kwargs)
 
         # If organisation is approved on creation, create default service
@@ -195,9 +196,9 @@ class Organisation(Document):
     @coroutine
     def can_update(self, user, **data):
         """
-        Global admin's can always update an organisation.
+        Global admins can always update an organisation.
 
-        Organisation admin's and creators can update, but may not update the following fields:
+        Organisation admins and creators can update, but may not update the following fields:
 
             - star_rating
 

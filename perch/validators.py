@@ -99,6 +99,47 @@ def validate_url(url):
     return url
 
 
+def validate_reference_links(reference_links):
+    """
+    Vaidate reference links data structure
+
+    Expected data structure:
+        {
+            "links": {
+                id_type1: url1,
+                id_type2: url2
+            },
+            "redirect_id_type": id_type1 | id1_type2
+        }
+
+    where links is an optional key but must be a dictionary with id types to
+    URLs if it exists, and redirect_id_type is optional but if it exists,
+    it must point to one of the existing id types in the links object. It is
+    used to set a default redirect URL that is used by the resolution service.
+    """
+    allowed_keys = ['links', 'redirect_id_type']
+
+    if not isinstance(reference_links, dict):
+        raise Invalid('Expected reference_links to be an object')
+
+    if 'links' in reference_links and not isinstance(reference_links['links'], dict):
+        raise Invalid('Expected links in reference_links to be an object')
+
+    links = reference_links.get('links', {})
+    redirect_id_type = reference_links.get('redirect_id_type')
+
+    for key in reference_links:
+        if key not in allowed_keys:
+            raise Invalid('Key {} is not allowed'.format(key))
+
+    if redirect_id_type and redirect_id_type not in links:
+        raise Invalid('Redirect ID type must point to one of the links\' ID types')
+
+    [validate_url(url) for url in links.values()]
+
+    return reference_links
+
+
 VALID_STATES = {x.name for x in State}
 VALID_USER_STATES = {x.name for x in [State.approved, State.deactivated]}
 
@@ -106,8 +147,10 @@ VALID_USER_STATES = {x.name for x in [State.approved, State.deactivated]}
 def validate_state(state):
     return _validate_state(state, VALID_STATES)
 
+
 def validate_user_state(state):
     return _validate_state(state, VALID_USER_STATES)
+
 
 def _validate_state(state, valid_states):
     """Validate a state string"""

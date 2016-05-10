@@ -20,8 +20,10 @@ def test_reference_links_view():
         'type': 'organisation',
         'state': 'approved',
         'reference_links': {
-            'source_id_type1': 'https://example.com',
-            'source_id_type2': 'https://example2.com'
+            'links': {
+                'source_id_type1': 'https://example.com',
+                'source_id_type2': 'https://example2.com'
+            }
         }
     }
     results = sorted([x for x in views.reference_links(doc)])
@@ -30,6 +32,7 @@ def test_reference_links_view():
         ('source_id_type2', {'organisation_id': 'org1', 'link': 'https://example2.com'}),
     ]
     assert results == expected
+
 
 def test_reference_links_deactivated_view():
     doc = {
