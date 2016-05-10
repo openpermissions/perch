@@ -37,6 +37,10 @@ TEST_REFERENCE_LINKS = {
     'missing_links': {
         'links': {},
         'redirect_id_type': 'id1'
+    },
+    'extra_keys': {
+        'links': {},
+        'extra1': 'test1'
     }
 }
 
@@ -101,7 +105,19 @@ class CheckOrganisationDefaults(AsyncTestCase):
 
 class CheckOrganisationLinks(AsyncTestCase):
     @gen_test
-    def test_create_org_with_reference_links(self):
+    def test_create_org_with_empty_reference_links(self):
+        reference_links = {}
+        user = User()
+        with patch.object(Organisation, '_save', return_value=make_future(None)):
+            org = yield Organisation.create(user,
+                                            name='testorg',
+                                            created_by='testuser',
+                                            reference_links=reference_links)
+            validate_schema(org)
+            assert org.reference_links == {}
+
+    @gen_test
+    def test_create_org_with_reference_links_empty_links(self):
         reference_links = {'links': {}}
         user = User()
         with patch.object(Organisation, '_save', return_value=make_future(None)):
@@ -139,6 +155,19 @@ class CheckOrganisationLinks(AsyncTestCase):
                 validate_schema(org)
             msg = 'Redirect ID type must point to one of the links\' ID types'
             assert exc.value.error_message == msg
+
+    @gen_test
+    def test_create_org_with_reference_links_with_extra_keys(self):
+        user = User()
+        reference_links = TEST_REFERENCE_LINKS['extra_keys']
+        with patch.object(Organisation, '_save', return_value=make_future(None)):
+            with pytest.raises(MultipleInvalid) as exc:
+                org = yield Organisation.create(user,
+                                                name='testorg',
+                                                created_by='testuser',
+                                                reference_links=reference_links)
+                validate_schema(org)
+            assert exc.value.error_message == 'Key extra1 is not allowed'
 
     @gen_test
     def test_create_org_with_invalid_reference_url(self):
@@ -188,3 +217,22 @@ class CheckOrganisationLinks(AsyncTestCase):
                 validate_schema(org)
             msg = 'Redirect ID type must point to one of the links\' ID types'
             assert exc.value.error_message == msg
+
+    @gen_test
+    def test_update_reference_links_with_extra_keys(self):
+        orgs = {'testorgid': {'state': 'approved', 'role': 'administrator'}}
+        user = User(password='testpass', id='testuserid', organisations=orgs)
+        reference_links = TEST_REFERENCE_LINKS['valid']
+        updated_reference_links = TEST_REFERENCE_LINKS['extra_keys']
+        with patch.object(Organisation, '_save', return_value=make_future(None)):
+            org = yield Organisation.create(user,
+                                            _id='testorgid',
+                                            name='testorg',
+                                            created_by='testuser',
+                                            reference_links=reference_links)
+            validate_schema(org)
+
+            with pytest.raises(MultipleInvalid) as exc:
+                yield org.update(user, reference_links=updated_reference_links)
+                validate_schema(org)
+            assert exc.value.error_message == 'Key extra1 is not allowed'

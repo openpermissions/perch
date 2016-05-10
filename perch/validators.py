@@ -10,7 +10,6 @@
 """Voluptuous validotor functions"""
 import re
 from urlparse import urlsplit
-from collections import defaultdict
 
 from voluptuous import AllInvalid, Invalid, Schema, ALLOW_EXTRA
 
@@ -118,24 +117,25 @@ def validate_reference_links(reference_links):
     it must point to one of the existing id types in the links object. It is
     used to set a default redirect URL that is used by the resolution service.
     """
-    validated_reference_links = defaultdict(dict)
+    allowed_keys = ['links', 'redirect_id_type']
+
+    if not isinstance(reference_links, dict):
+        raise Invalid('Expected reference_links to be an object')
+
+    if 'links' in reference_links and not isinstance(reference_links['links'], dict):
+        raise Invalid('Expected links in reference_links to be an object')
+
+    for key in reference_links:
+        if key not in allowed_keys:
+            raise Invalid('Key {} is not allowed'.format(key))
+
     redirect_id_type = reference_links.get('redirect_id_type')
-    links = reference_links.get('links')
+    if redirect_id_type and redirect_id_type not in reference_links['links']:
+        raise Invalid('Redirect ID type must point to one of the links\' ID types')
 
-    if redirect_id_type:
-        if 'links' not in reference_links:
-            raise Invalid('Expected key links in reference_links')
-        elif not isinstance(links, dict):
-            raise Invalid('Expected links in reference_links to be an object')
-        elif redirect_id_type not in links:
-            raise Invalid('Redirect ID type must point to one of the links\' ID types')
-        validated_reference_links['redirect_id_type'] = redirect_id_type
+    [validate_url(url) for url in reference_links.get('links', {}).values()]
 
-    if links:
-        for id_type, url in links.items():
-            validated_reference_links['links'][id_type] = validate_url(url)
-
-    return validated_reference_links
+    return reference_links
 
 
 VALID_STATES = {x.name for x in State}
