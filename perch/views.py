@@ -267,7 +267,7 @@ def organisation_name(doc):
 def reference_links(doc):
     """Get reference links"""
     if doc.get('type') == 'organisation' and doc.get('state') != 'deactivated':
-        for asset_id_type, link in doc.get('reference_links', {}).items():
+        for asset_id_type, link in doc.get('reference_links', {}).get('links', {}).items():
             value = {
                 'organisation_id': doc['_id'],
                 'link': link
