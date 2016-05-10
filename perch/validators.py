@@ -125,15 +125,17 @@ def validate_reference_links(reference_links):
     if 'links' in reference_links and not isinstance(reference_links['links'], dict):
         raise Invalid('Expected links in reference_links to be an object')
 
+    links = reference_links.get('links', {})
+    redirect_id_type = reference_links.get('redirect_id_type')
+
     for key in reference_links:
         if key not in allowed_keys:
             raise Invalid('Key {} is not allowed'.format(key))
 
-    redirect_id_type = reference_links.get('redirect_id_type')
-    if redirect_id_type and redirect_id_type not in reference_links['links']:
+    if redirect_id_type and redirect_id_type not in links:
         raise Invalid('Redirect ID type must point to one of the links\' ID types')
 
-    [validate_url(url) for url in reference_links.get('links', {}).values()]
+    [validate_url(url) for url in links.values()]
 
     return reference_links
 

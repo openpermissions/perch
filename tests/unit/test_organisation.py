@@ -35,7 +35,6 @@ TEST_REFERENCE_LINKS = {
         'links': {'id1': 'notavalidurl', 'id2': 'https://id2.com'}
     },
     'missing_links': {
-        'links': {},
         'redirect_id_type': 'id1'
     },
     'extra_keys': {
