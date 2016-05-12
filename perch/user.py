@@ -78,7 +78,6 @@ class User(Document):
             Required('password'): All(unicode, password_length),
             Required('has_agreed_to_terms'): True,
             Required('organisations', default={}): orgs_schema,
-            Required('verified', default=False): bool,
             Required('state', default=User.default_state.name): validators.validate_user_state,
             Required('role', default=User.roles.default.value): In([x.value for x in User.roles]),
             'first_name': unicode,
@@ -89,6 +88,12 @@ class User(Document):
         })
 
         return schema
+
+    def clean(self):
+        """Verified value is derived from whether user has a verification hash"""
+        result = super(User, self).clean()
+        result['verified'] = 'verification_hash' not in self._resource
+        return result
 
     @coroutine
     def can_update(self, user, **kwargs):
@@ -121,7 +126,6 @@ class User(Document):
     @classmethod
     @coroutine
     def create(cls, user, password, **kwargs):
-        kwargs['verified'] = False
         kwargs['verification_hash'] = unicode(uuid.uuid4().hex)
 
         resource = cls(password=cls.hash_password(password), **kwargs)
@@ -142,15 +146,10 @@ class User(Document):
         data = {
             'email': email,
             'password': cls.hash_password(password),
-            'verified': True,
             'has_agreed_to_terms': True,
             'state': State.approved,
-            'organisations': {
-                GLOBAL: {
-                    'state': State.approved,
-                    'role': cls.roles.administrator.value
-                }
-            }
+            'role': cls.roles.administrator.value,
+            'organisations': {}
         }
         data.update(**kwargs)
 
@@ -233,17 +232,15 @@ class User(Document):
         :returns: a User instance
         """
         user = yield cls.get(user_id)
-        if user.verified:
+
+        # If user does not have verification hash then this means they have already been verified
+        if 'verification_hash' not in user._resource:
             raise Return(user)
 
-        # NOTE: if the user is not verified and doesn't have a verification
-        # hash, then this will result in an error
-        # TODO: do we need to handle this scenario?
         if user.verification_hash != verification_hash:
             raise exceptions.ValidationError('Invalid verification hash')
 
         del user.verification_hash
-        user.verified = True
         yield user._save()
 
         raise Return(user)

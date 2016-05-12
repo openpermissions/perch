@@ -28,7 +28,6 @@ USERS = [
         'type': 'user',
         'email': 'user0@mail.test',
         'password': User.hash_password('password0'),
-        'verified': True,
         'state': 'approved',
         'has_agreed_to_terms': True,
         'organisations': {}
@@ -37,14 +36,14 @@ USERS = [
         'type': 'user',
         'email': 'user1@mail.test',
         'password': User.hash_password('password1'),
-        'verified': False,
         'state': 'approved',
         'has_agreed_to_terms': True,
         'verification_hash': 'this is a hash'
     }
 ]
 
-UNVERIFIED_USER = USERS[-1]
+VERIFIED_USER = USERS[0]
+UNVERIFIED_USER = USERS[1]
 
 patched_get = patch_view(User.view, USERS)
 
@@ -66,7 +65,6 @@ class CreateUser(AsyncTestCase):
         assert user.password != 'password'
         assert user.verify_password('password')
         assert user.state == State.approved
-        assert not user.verified
         assert user.verification_hash
 
         assert db_client().save_doc.call_count == 1
@@ -90,7 +88,7 @@ class CreateUser(AsyncTestCase):
         assert user.last_name == 'user'
         assert user.verify_password('password')
         assert user.state == State.approved
-        assert user.verified
+        assert 'verification_hash' not in user._resource
         assert user.is_admin()
 
         assert db_client().save_doc.call_count == 1
@@ -150,7 +148,6 @@ class Verify(AsyncTestCase):
 
         assert user.id == UNVERIFIED_USER['_id']
         assert user.state == State.approved
-        assert user.verified
         assert 'verification_hash' not in user._resource
         db_client().save_doc.assert_called_once_with(user._resource)
 
@@ -226,14 +223,12 @@ class CheckUserDefaults(AsyncTestCase):
         assert user.type == 'user'
         assert user.organisations == {}
         assert user.role == 'user'
-        assert not user.verified
         assert user.state.name == 'approved'
 
     @gen_test
     def test_get_required_fields_with_defaults(self):
         test_user = User(password='password', id='uid')
         expected_org_defaults = {
-            'verified': False,
             'state': 'approved',
             'role': 'user',
             'type': 'user',
@@ -306,3 +301,25 @@ class CanUpdate(AsyncTestCase):
 
         result = yield user_to_update.can_update(user_doing_update, first_name='TestName')
         assert result == (False, set([]))
+
+
+@pytest.mark.parametrize("user", USERS)
+def test_internal_fields_not_returned(user):
+    u = User(**user)
+    result = u.clean()
+
+    assert '_id' not in result
+    assert 'password' not in result
+    assert 'verification_hash' not in result
+
+
+def test_verified():
+    u = User(**VERIFIED_USER)
+    result = u.clean()
+    assert result['verified'] is True
+
+
+def test_unverified():
+    u = User(**UNVERIFIED_USER)
+    result = u.clean()
+    assert result['verified'] is False

@@ -24,7 +24,6 @@ USER = {
     'type': 'user',
     'email': 'user0@mail.test',
     'password': User.hash_password('password0'),
-    'verified': True,
     'state': 'approved',
     'role': 'user',
     'has_agreed_to_terms': True,
