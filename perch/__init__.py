@@ -11,6 +11,7 @@ from tornado.options import define
 from .model import *
 from .user import *
 from .organisation import *
+from . import migrate
 
 __version__ = '0.15.4'
 
