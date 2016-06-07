@@ -76,6 +76,7 @@ class Organisation(Document):
             },
             '_id': unicode,
             '_rev': unicode,
+            '_version': unicode,
             'description': unicode,
             'address': unicode,
             'email': Any(validators.valid_email, ''),
@@ -308,6 +309,7 @@ class Service(SubResource):
 
     default_permission = [{'type': 'all', 'value': None, 'permission': 'rw'}]
     schema = MetaSchema({
+        '_version': unicode,
         Required('id', default=lambda: unicode(uuid.uuid4().hex)): unicode,
         Required('name'): All(unicode, service_name_length),
         Required('organisation_id'): unicode,
@@ -516,6 +518,7 @@ class Repository(SubResource):
                                      max=options.max_length_repository_name)
 
     schema = Schema({
+        '_version': unicode,
         Required('id', default=lambda: unicode(uuid.uuid4().hex)): unicode,
         Required('name'): All(unicode, _repository_name_length),
         Required('service_id'): unicode,
@@ -724,7 +727,8 @@ class OAuthSecret(Document):
         Required('_id', default=generate_secret): unicode,
         Required('client_id'): unicode,
         Required('type', default=resource_type): resource_type,
-        '_rev': unicode
+        '_rev': unicode,
+        '_version': unicode
     })
 
     @classmethod

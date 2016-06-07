@@ -149,6 +149,12 @@ def load_design_docs():
 
 
 @view('registry')
+def resource_version(doc):
+    """View for querying resources by version (used for data migrations)"""
+    yield [doc.get('type'), doc.get('_version', '')], doc['_id']
+
+
+@view('registry')
 def active_users(doc):
     """View for getting users"""
     if doc.get('type') == 'user' and doc.get('state') != 'deactivated':
