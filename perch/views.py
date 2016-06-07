@@ -1,13 +1,16 @@
 # -*- coding: utf-8 -*-
 # Copyright 2016 Open Permissions Platform Coalition
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License. You may obtain a copy of the License at
-# http://www.apache.org/licenses/LICENSE-2.0
-# Unless required by applicable law or agreed to in writing, software distributed under the License is
-# distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and limitations under the License.
+# you may not use this file except in compliance with the License. You may
+# obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations under
+# the License.
 
-import logging
 import inspect
 from collections import defaultdict
 from functools import partial
@@ -24,16 +27,14 @@ _views = defaultdict(list)
 
 class View(object):
 
-    def __init__(self, db_name, func, version):
+    def __init__(self, db_name, func):
         """
         Wraps a map function, adding a get method.
         :param: db_name: name of database
         :param: func: map function
-        :param: version: design document version
         """
         self.db_name = db_name
         self.func = func
-        self.version = version
 
     @property
     def name(self):
@@ -53,7 +54,6 @@ class View(object):
 
         doc = {
             '_id': '_design/{}'.format(self.name),
-            'version': self.version,
             'language': 'python',
             'views': {
                 self.name: {
@@ -104,7 +104,7 @@ class View(object):
         raise Return([x['value'] for x in result['rows']])
 
 
-def view(db_name, version):
+def view(db_name):
     """
     Register a map function as a view
 
@@ -114,64 +114,55 @@ def view(db_name, version):
     anything outside the function's scope.
 
     :param db_name: the database name
-    :param version: the version (design docs are not loaded unless the version
-        is incremented)
     """
     def decorator(func):
-        v = View(db_name, func, version)
+        v = View(db_name, func)
         v.register()
         return v
     return decorator
 
 
-def load_design_docs(force=False):
+def load_design_docs():
     """
     Load design docs for registered views
-
-    :param force: Whether to force the design docs to change even if the
-        version number is not greater than the current design doc. Intended
-        for dev use
     """
     url = ':'.join([options.url_registry_db, str(options.db_port)])
     client = partial(couch.BlockingCouch, couch_url=url)
 
     for name, docs in _views.items():
         db = client(db_name=name)
-        changed = []
+        views = []
 
         for doc in docs:
             try:
                 current_doc = db.get_doc(doc['_id'])
+
+                # use the current _rev if not provided
+                if '_rev' not in doc:
+                    doc['_rev'] = current_doc['_rev']
             except couch.NotFound:
-                changed.append(doc)
-                continue
+                pass
 
-            # use the current _rev if not provided
-            if '_rev' not in doc:
-                doc['_rev'] = current_doc['_rev']
+            views.append(doc)
 
-            if force or current_doc['version'] < doc['version']:
-                changed.append(doc)
-            else:
-                logging.info('Design doc "{}" version has not changed'
-                             .format(doc['_id']))
-
-        db.save_docs(changed)
+        db.save_docs(views)
 
 
-@view('registry', '1.0.0')
+@view('registry')
 def active_users(doc):
     """View for getting users"""
     if doc.get('type') == 'user' and doc.get('state') != 'deactivated':
         yield doc.get('email'), doc['_id']
 
-@view('registry', '1.0.0')
+
+@view('registry')
 def users(doc):
     """View for getting users"""
     if doc.get('type') == 'user':
         yield doc.get('email'), doc['_id']
 
-@view('registry', '1.0.0')
+
+@view('registry')
 def active_user_organisations_resource(doc):
     """Get user.organisations subresouces"""
     if doc.get('type') == 'user' and doc.get('state') != 'deactivated':
@@ -181,7 +172,8 @@ def active_user_organisations_resource(doc):
                 resource['user_id'] = doc['_id']
                 yield [doc['_id'], org_id], resource
 
-@view('registry', '1.0.0')
+
+@view('registry')
 def user_organisations_resource(doc):
     """Get user.organisations subresouces"""
     if doc.get('type') == 'user':
@@ -190,7 +182,8 @@ def user_organisations_resource(doc):
             resource['user_id'] = doc['_id']
             yield [doc['_id'], org_id], resource
 
-@view('registry', '1.0.0')
+
+@view('registry')
 def active_joined_organisations(doc):
     """View for getting organisations associated with a user"""
     if doc.get('type') == 'user' and doc.get('state') != 'deactivated':
@@ -208,7 +201,8 @@ def active_joined_organisations(doc):
             except KeyError:
                 pass
 
-@view('registry', '1.0.1')
+
+@view('registry')
 def joined_organisations(doc):
     """View for getting organisations associated with a user"""
     if doc.get('type') == 'user':
@@ -225,7 +219,7 @@ def joined_organisations(doc):
                 pass
 
 
-@view('registry', '1.0.0')
+@view('registry')
 def organisation_members(doc):
     """Lookup users that have joined an organisation"""
     if doc.get('type') == 'user':
@@ -233,7 +227,7 @@ def organisation_members(doc):
             yield org_id, doc['_id']
 
 
-@view('registry', '1.0.1')
+@view('registry')
 def admin_emails(doc):
     """View for an orginsation's admin email addresses"""
     if doc.get('type') == 'user' and doc.get('state') != 'deactivated':
@@ -242,28 +236,28 @@ def admin_emails(doc):
                 yield org_id, doc['email']
 
 
-@view('registry', '1.0.0')
+@view('registry')
 def active_organisations(doc):
     """View for getting active organisations"""
     if doc.get('type') == 'organisation' and doc.get('state') != 'deactivated':
         yield doc.get('state'), doc['_id']
 
 
-@view('registry', '1.0.0')
+@view('registry')
 def organisations(doc):
     """View for getting organisations"""
     if doc.get('type') == 'organisation':
         yield doc.get('state'), doc['_id']
 
 
-@view('registry', '1.0.0')
+@view('registry')
 def organisation_name(doc):
     """View for getting organisations by their name"""
     if doc.get('type') == 'organisation':
         yield doc.get('name'), doc['_id']
 
 
-@view('registry', '1.0.3')
+@view('registry')
 def reference_links(doc):
     """Get reference links"""
     if doc.get('type') == 'organisation' and doc.get('state') != 'deactivated':
@@ -275,7 +269,7 @@ def reference_links(doc):
             yield asset_id_type, value
 
 
-@view('registry', '1.0.0')
+@view('registry')
 def active_services(doc):
     """View for getting active services"""
     if doc.get('state') != 'deactivated':
@@ -293,7 +287,7 @@ def active_services(doc):
                 yield [None, None], service
 
 
-@view('registry', '1.0.0')
+@view('registry')
 def services(doc):
     """View for getting services"""
     for service_id, service in doc.get('services', {}).items():
@@ -309,7 +303,7 @@ def services(doc):
         yield [None, None], service
 
 
-@view('registry', '1.0.0')
+@view('registry')
 def active_service_location(doc):
     """View for getting active service by location"""
     if doc.get('state') != 'deactivated':
@@ -323,7 +317,7 @@ def active_service_location(doc):
                     yield location, service
 
 
-@view('registry', '1.0.0')
+@view('registry')
 def service_location(doc):
     """View for getting service by location"""
     for service_id, service in doc.get('services', {}).items():
@@ -335,7 +329,7 @@ def service_location(doc):
             yield location, service
 
 
-@view('registry', '1.0.0')
+@view('registry')
 def service_name(doc):
     """View for getting service by name"""
     for service_id, service in doc.get('services', {}).items():
@@ -347,21 +341,21 @@ def service_name(doc):
             yield name, service
 
 
-@view('registry', '1.0.0')
+@view('registry')
 def oauth_secrets(doc):
     """View for OAuth secrets"""
     if doc.get('type') == 'oauth_client_credentials':
         yield doc.get('client_id'), doc['_id']
 
 
-@view('registry', '1.0.0')
+@view('registry')
 def oauth_client(doc):
     """View for getting OAuth clients using the secret"""
     if doc.get('type') == 'oauth_client_credentials':
         yield [doc['_id'], doc['client_id']], doc['_id']
 
 
-@view('registry', '1.0.0')
+@view('registry')
 def active_repositories(doc):
     """View for getting active repositories"""
     if doc.get('state') != 'deactivated':
@@ -373,7 +367,7 @@ def active_repositories(doc):
                 yield repository_id, repo
 
 
-@view('registry', '1.0.0')
+@view('registry')
 def repositories(doc):
     """View for getting repositories"""
     for repository_id, repo in doc.get('repositories', {}).items():
@@ -383,7 +377,7 @@ def repositories(doc):
         yield repository_id, repo
 
 
-@view('registry', '1.0.0')
+@view('registry')
 def repository_name(doc):
     """View for checking repository name is unique"""
     for repository_id, repo in doc.get('repositories', {}).items():
@@ -395,7 +389,7 @@ def repository_name(doc):
             yield name, repository_id
 
 
-@view('registry', '1.0.2')
+@view('registry')
 def service_and_repository(doc):
     """
     View for looking up services and repositories by their ID
