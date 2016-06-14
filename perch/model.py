@@ -443,6 +443,7 @@ class Document(object):
     def state(self, value):
         self._resource['state'] = value
 
+
 class SubResource(Document):
     _parent = None
     schema = Schema({'id': unicode}, extra=ALLOW_EXTRA)
@@ -476,6 +477,32 @@ class SubResource(Document):
             self._parent = yield self.parent_resource.get(self.parent_id)
 
         raise Return(self._parent)
+
+    @classmethod
+    def parent_resources(cls):
+        """Get a list of parent resources, starting from the Document"""
+        parent = cls.parent_resource
+        parents = [parent]
+
+        try:
+            while True:
+                parent = parent.parent_resource
+                parents.append(parent)
+        except AttributeError:
+            pass
+
+        parents.reverse()
+        return parents
+
+    @classmethod
+    def parent_document(cls):
+        """
+        Walk up all parent_resources to get the Document
+
+        Might not be the same as self.parent_resource because could be a
+        sub-sub-resource
+        """
+        return cls.parent_resources()[0]
 
     @property
     def id(self):

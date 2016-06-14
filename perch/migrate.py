@@ -44,22 +44,11 @@ class Migration(object):
         migrations = self._get_migrations()
         migrations['migrations'].append(self)
 
-    @classmethod
-    def _get_parents(cls, resource):
-        parents = []
-
-        if hasattr(resource, 'parent_resource'):
-            parents = cls._get_parents(resource.parent_resource)
-            parents.append(resource.parent_resource)
-
-        return parents
-
     def _get_migrations(self):
-        parents = self._get_parents(self.resource)
-
-        if not parents:
+        if not hasattr(self.resource, 'parent_resources'):
             return _migrations[self.resource][self.previous_version]
 
+        parents = self.resource.parent_resources()
         m = _migrations[parents[0]][self.previous_version]
         for p in parents[1:] + [self.resource]:
             m = m['subresources'][p]
