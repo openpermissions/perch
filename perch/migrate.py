@@ -11,8 +11,14 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 import importlib
+import logging
 import pkgutil
 from collections import defaultdict
+from functools import wraps
+
+from tornado.gen import coroutine
+
+from .views import resource_version
 
 
 __all__ = ['migration', 'Migration', 'collect', 'run_migrations']
@@ -20,11 +26,11 @@ __all__ = ['migration', 'Migration', 'collect', 'run_migrations']
 
 def migration_registry():
     return defaultdict(lambda: {
-        'migrations': defaultdict(list),
+        'migrations': [],
         'subresources': migration_registry()
     })
 
-_migrations = migration_registry()
+_migrations = defaultdict(migration_registry)
 
 
 class Migration(object):
@@ -36,7 +42,7 @@ class Migration(object):
 
     def register(self):
         migrations = self._get_migrations()
-        migrations[self.previous_version].append(self)
+        migrations['migrations'].append(self)
 
     @classmethod
     def _get_parents(cls, resource):
@@ -50,15 +56,30 @@ class Migration(object):
 
     def _get_migrations(self):
         parents = self._get_parents(self.resource)
-        m = _migrations
 
-        for p in parents:
-            m = m[p]['subresources']
+        if not parents:
+            return _migrations[self.resource][self.previous_version]
 
-        return m[self.resource]['migrations']
+        m = _migrations[parents[0]][self.previous_version]
+        for p in parents[1:] + [self.resource]:
+            m = m['subresources'][p]
 
-    def __call__(self, doc):
-        return self.func(doc)
+        return m
+
+    def __call__(self, instance):
+        """
+        Apply a migration
+
+        :param instance: a perch.Document or perch.SubResource instance
+        """
+        logging.info('Migrating {} {}{} to {}'.format(
+            instance.resource_type,
+            instance.id,
+            ' from ' + self.previous_version if self.previous_version else '',
+            self.version
+        ))
+
+        return self.func(instance)
 
     def __unicode__(self):
         return "<Migrate {} {} to {}>".format(
@@ -74,7 +95,13 @@ class Migration(object):
 def migration(resource, version, previous_version=''):
     """Register a migration function"""
     def decorator(func):
-        m = Migration(func, resource, version, previous_version)
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            migrated = func(*args, **kwargs)
+
+            return migrated
+
+        m = Migration(wrapper, resource, version, previous_version)
         m.register()
 
         return m
@@ -95,10 +122,100 @@ def collect(package='perch.migrations'):
     return _migrations
 
 
+@coroutine
 def run_migrations(migrations):
     """
     Run migrations for a resource type
 
     :param: a dicitionary of migrations
     """
-    pass
+    for resource, resource_migrations in migrations.items():
+        for version in resource_migrations:
+            to_migrate = yield resource_version.get(
+                key=[resource.resource_type, version],
+                include_docs=True)
+
+            for x in to_migrate['rows']:
+                instance = resource(**x['doc'])
+                instance = _migrate_resource(
+                    instance,
+                    resource_migrations,
+                    version
+                )
+
+                yield instance._save()
+
+
+def _migrate_resource(instance, migrations, version=''):
+    """
+    Migrate a resource instance
+
+    Subresources are migrated first, then the resource is recursively migrated
+
+    :param instance: a perch.Document instance
+    :param migrations: the migrations for a resource
+    :param version: the current resource version to migrate
+    """
+    if version not in migrations:
+        return instance
+
+    instance = _migrate_subresources(
+        instance,
+        migrations[version]['subresources']
+    )
+
+    for migration in migrations[version]['migrations']:
+        instance = migration(instance)
+        instance.doc_version = unicode(migration.version)
+
+        instance = _migrate_resource(
+            instance,
+            migrations,
+            version=migration.version
+        )
+
+    return instance
+
+
+def _migrate_subresources(parent, migrations):
+    """
+    Migrate a resource's subresources
+
+    :param parent: the parent perch.Document instance
+    :param migrations: the migrations for a resource
+    """
+    for subresource, resource_migrations in migrations.items():
+        parent = _migrate_subresource(
+            subresource,
+            parent,
+            resource_migrations
+        )
+
+    return parent
+
+
+def _migrate_subresource(subresource, parent, migrations):
+    """
+    Migrate a resource's subresource
+
+    :param subresource: the perch.SubResource instance
+    :param parent: the parent perch.Document instance
+    :param migrations: the migrations for a resource
+    """
+    for key, doc in getattr(parent, subresource.parent_key, {}).items():
+        for migration in migrations['migrations']:
+            instance = migration(subresource(id=key, **doc))
+            parent.doc_version = unicode(migration.version)
+
+            instance = _migrate_subresources(
+                instance,
+                migrations['subresources']
+            )
+
+        doc = instance._resource
+        doc.pop('id', None)
+        doc.pop(instance.resource_type + '_id', None)
+
+        getattr(parent, subresource.parent_key)[key] = doc
+
+    return parent

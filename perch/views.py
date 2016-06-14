@@ -151,7 +151,7 @@ def load_design_docs():
 @view('registry')
 def resource_version(doc):
     """View for querying resources by version (used for data migrations)"""
-    yield [doc.get('type'), doc.get('_version', '')], doc['_id']
+    yield (doc.get('type'), doc.get('doc_version', '')), doc['_id']
 
 
 @view('registry')

@@ -80,7 +80,7 @@ class User(Document):
         schema = Schema({
             '_id': unicode,
             '_rev': unicode,
-            '_version': unicode,
+            'doc_version': unicode,
             Required('type', default=cls.resource_type): cls.resource_type,
             Required('email'): validators.valid_email,
             Required('password'): All(unicode, password_length),
@@ -336,7 +336,6 @@ class UserOrganisation(SubResource):
     editable_states = [State.approved]
 
     schema = Schema({
-        '_version': unicode,
         'id': unicode,
         'user_id': unicode,
         Required('state', default=SubResource.default_state.name): validators.validate_state,

@@ -55,13 +55,13 @@ def format_error(invalid, doc_type):
 
 
 class Document(object):
-    internal_fields = ['type', '_id', '_rev', '_version']
+    internal_fields = ['type', '_id', '_rev', 'doc_version']
     _resource = {}
     resource_type = None
     schema = Schema({
         '_id': unicode,
         '_rev': unicode,
-        '_version': unicode
+        'doc_version': unicode
     }, extra=ALLOW_EXTRA)
     # read only fields can not be changed after the resource has been created
     read_only_fields = []

@@ -10,9 +10,12 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
 # License for the specific language governing permissions and limitations under
 # the License.
+from collections import defaultdict
+
 from mock import patch
 
 import perch
+from perch.migrate import migration_registry
 
 
 class A(perch.Document):
@@ -33,29 +36,34 @@ class D(perch.SubResource):
     parent_resource = C
 
 
+def _migration_registry():
+    return defaultdict(migration_registry)
+
+
 def test_register_migration():
     def func(doc):
         pass
 
-    with patch('perch.migrate._migrations', perch.migrate.migration_registry()) as migrations:
+    with patch('perch.migrate._migrations', _migration_registry()) as migrations:
         m = perch.migrate.migration(A, 'v1')(func)
 
     expected = {
         A: {
-            'migrations': {'': [m]},
-            'subresources': {}
+            '': {
+                'migrations': [m],
+                'subresources': {}
+            }
         }
     }
 
     assert isinstance(m, perch.migrate.Migration)
-    assert m.func == func
     assert m.version == 'v1'
     assert m.previous_version == ''
     assert migrations == expected
 
 
 def test_register_multiple_migrations():
-    with patch('perch.migrate._migrations', perch.migrate.migration_registry()) as migrations:
+    with patch('perch.migrate._migrations', _migration_registry()) as migrations:
         first = perch.migrate.migration(A, 'v1')(lambda: 1)
         second = perch.migrate.migration(A, 'v2', first.version)(lambda: 1)
         third = perch.migrate.migration(A, 'v3', second.version)(lambda: 1)
@@ -64,19 +72,28 @@ def test_register_multiple_migrations():
 
     expected = {
         A: {
-            'migrations': {
-                '': [first],
-                first.version: [second],
-                second.version: [third],
+            '': {
+                'migrations': [first],
+                'subresources': {}
             },
-            'subresources': {}
+            first.version: {
+                'migrations': [second],
+                'subresources': {}
+            },
+            second.version: {
+                'migrations': [third],
+                'subresources': {}
+            }
         },
         B: {
-            'migrations': {
-                '': [fourth],
-                fourth.version: [fifth],
+            '': {
+                'migrations': [fourth],
+                'subresources': {}
             },
-            'subresources': {}
+            fourth.version: {
+                'migrations': [fifth],
+                'subresources': {}
+            }
         }
     }
 
@@ -84,19 +101,21 @@ def test_register_multiple_migrations():
 
 
 def test_register_subresource_migration():
-    with patch('perch.migrate._migrations', perch.migrate.migration_registry()) as migrations:
+    with patch('perch.migrate._migrations', _migration_registry()) as migrations:
         m = perch.migrate.migration(D, 'v1')(lambda: 1)
 
     expected = {
         A: {
-            'migrations': {},
-            'subresources': {
-                C: {
-                    'migrations': {},
-                    'subresources': {
-                        D: {
-                            'migrations': {'': [m]},
-                            'subresources': {}
+            '': {
+                'migrations': [],
+                'subresources': {
+                    C: {
+                        'migrations': [],
+                        'subresources': {
+                            D: {
+                                'migrations': [m],
+                                'subresources': {}
+                            }
                         }
                     }
                 }
@@ -108,14 +127,16 @@ def test_register_subresource_migration():
 
 
 def test_register_fork():
-    with patch('perch.migrate._migrations', perch.migrate.migration_registry()) as migrations:
+    with patch('perch.migrate._migrations', _migration_registry()) as migrations:
         first = perch.migrate.migration(A, 'v2', 'v1')(lambda: 1)
         second = perch.migrate.migration(A, 'v3', 'v1')(lambda: 1)
 
     expected = {
         A: {
-            'migrations': {'v1': [first, second]},
-            'subresources': {}
+            'v1': {
+                'migrations': [first, second],
+                'subresources': {}
+            }
         }
     }
 
