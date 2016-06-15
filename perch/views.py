@@ -194,8 +194,6 @@ def active_joined_organisations(doc):
     """View for getting organisations associated with a user"""
     if doc.get('type') == 'user' and doc.get('state') != 'deactivated':
         for org_id, state in doc.get('organisations', {}).items():
-            if org_id == 'global':
-                continue
             if state['state'] == 'deactivated':
                 continue
 
@@ -213,9 +211,6 @@ def joined_organisations(doc):
     """View for getting organisations associated with a user"""
     if doc.get('type') == 'user':
         for org_id, state in doc.get('organisations', {}).items():
-            if org_id == 'global':
-                continue
-
             org = {'_id': org_id}
             yield [doc['_id'], None], org
 

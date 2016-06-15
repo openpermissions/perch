@@ -20,12 +20,9 @@ class WithRelations(AsyncTestCase):
 
     USER = {
         "id": "user1",
-        "organisations": {
-            "global": {
-                "role": "user",
-                "state": "approved"
-            }
-        }
+        "role": "user",
+        "state": "approved",
+        "organisations": {}
     }
 
     @gen_test

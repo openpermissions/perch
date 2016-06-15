@@ -24,29 +24,18 @@ USER = {
     'type': 'user',
     'email': 'user0@mail.test',
     'password': User.hash_password('password0'),
-    'verified': True,
     'state': 'approved',
+    'role': 'user',
     'has_agreed_to_terms': True,
-    'organisations': {
-        'global': {
-            'state': 'approved',
-            'role': 'user'
-            }
-    }
+    'organisations': {}
 }
 
-global_joins = [
-    ({'global': {
-        'state': 'approved',
-        'role': 'administrator'
-    }}, True),
-    ({'global': {
-        'state': 'approved',
-        'role': 'user'
-    }}, False)
+sys_role = [
+    ('administrator', True),
+    ('user', False)
 ]
 
-user_joins = [
+org_user_role = [
     ({
         'state': 'pending',
         'role': 'user'
@@ -65,7 +54,7 @@ user_joins = [
     }, False),
 ]
 
-admin_joins = [
+org_admin_role = [
     ({
         'state': 'pending',
         'role': 'administrator'
@@ -87,10 +76,10 @@ admin_joins = [
 class TestOrganisation():
     organisation = Organisation(id='org0')
 
-    @pytest.mark.parametrize("org_info,expected", global_joins)
-    def test_can_approve(self, org_info, expected):
+    @pytest.mark.parametrize("role,expected", sys_role)
+    def test_can_approve(self, role, expected):
         u = deepcopy(USER)
-        u['organisations'] = org_info
+        u['role'] = role
         user = User(**u)
         func = partial(self.organisation.can_approve, user)
         result = IOLoop.instance().run_sync(func)
@@ -98,43 +87,43 @@ class TestOrganisation():
 
 class TestService():
 
-    @pytest.mark.parametrize("org_info,expected", global_joins)
-    def test_can_approve_external(self, org_info, expected):
+    @pytest.mark.parametrize("role,expected", sys_role)
+    def test_can_approve_external(self, role, expected):
         service = Service(id='serv0', service_type="external")
         u = deepcopy(USER)
-        u['organisations'] = org_info
+        u['role'] = role
         user = User(**u)
         func = partial(service.can_approve, user)
         result = IOLoop.instance().run_sync(func)
         # External services should always be approvable
         assert result is True
 
-    @pytest.mark.parametrize("org_info,expected", global_joins)
-    def test_can_approve_external_provided(self, org_info, expected):
+    @pytest.mark.parametrize("role,expected", sys_role)
+    def test_can_approve_external_provided(self, role, expected):
         service = Service(id='serv0', service_type="repository")
         u = deepcopy(USER)
-        u['organisations'] = org_info
+        u['role'] = role
         user = User(**u)
         func = partial(service.can_approve, user, service_type='external')
         result = IOLoop.instance().run_sync(func)
         # External services should always be approvable
         assert result is True
 
-    @pytest.mark.parametrize("org_info,expected", global_joins)
-    def test_can_approve_non_external(self, org_info, expected):
+    @pytest.mark.parametrize("role,expected", sys_role)
+    def test_can_approve_non_external(self, role, expected):
         service = Service(id='serv0', service_type="repository")
         u = deepcopy(USER)
-        u['organisations'] = org_info
+        u['role'] = role
         user = User(**u)
         func = partial(service.can_approve, user)
         result = IOLoop.instance().run_sync(func)
         assert result == expected
 
-    @pytest.mark.parametrize("org_info,expected", global_joins)
-    def test_can_approve_non_external_provided(self, org_info, expected):
+    @pytest.mark.parametrize("role,expected", sys_role)
+    def test_can_approve_non_external_provided(self, role, expected):
         service = Service(id='serv0', service_type="external")
         u = deepcopy(USER)
-        u['organisations'] = org_info
+        u['role'] = role
         user = User(**u)
         func = partial(service.can_approve, user, service_type='repository')
         result = IOLoop.instance().run_sync(func)
@@ -158,17 +147,17 @@ class TestRepository():
             IOLoop.instance().run_sync(func)
             mock_response.assert_called_once_with('serv1')
 
-    @pytest.mark.parametrize("org_info,expected", global_joins)
-    def test_can_approve_no_org(self, org_info, expected):
+    @pytest.mark.parametrize("role,expected", sys_role)
+    def test_can_approve_no_org(self, role, expected):
         with patch.object(Service, 'get', return_value=make_future(self.service)):
             u = deepcopy(USER)
-            u['organisations'] = org_info
+            u['role'] = role
             user = User(**u)
             func = partial(self.repo.can_approve, user)
             result = IOLoop.instance().run_sync(func)
             assert result == expected
 
-    @pytest.mark.parametrize("org_info,expected", user_joins)
+    @pytest.mark.parametrize("org_info,expected", org_user_role)
     def test_can_approve_user_joins(self, org_info, expected):
         with patch.object(Service, 'get', return_value=make_future(self.service)):
             u = deepcopy(USER)
@@ -178,7 +167,7 @@ class TestRepository():
             result = IOLoop.instance().run_sync(func)
             assert result == expected
 
-    @pytest.mark.parametrize("org_info,expected", admin_joins)
+    @pytest.mark.parametrize("org_info,expected", org_admin_role)
     def test_can_approve_repo_admin_joins(self, org_info, expected):
         with patch.object(Service, 'get', return_value=make_future(self.service)):
             u = deepcopy(USER)
@@ -188,7 +177,7 @@ class TestRepository():
             result = IOLoop.instance().run_sync(func)
             assert result == expected
 
-    @pytest.mark.parametrize("org_info,expected", admin_joins)
+    @pytest.mark.parametrize("org_info,expected", org_admin_role)
     def test_can_approve_srv_admin_joins(self, org_info, expected):
         with patch.object(Service, 'get', return_value=make_future(self.service)):
             u = deepcopy(USER)
@@ -209,17 +198,17 @@ class TestRepository():
 class TestUserOrganisation():
     user_org = UserOrganisation(organisation_id='org0')
 
-    @pytest.mark.parametrize("org_info,expected", global_joins)
+    @pytest.mark.parametrize("org_info,expected", sys_role)
     def test_can_approve_no_org(self, org_info, expected):
         u = deepcopy(USER)
-        u['organisations'] = org_info
+        u['role'] = org_info
         user = User(**u)
         func = partial(self.user_org.can_approve, user)
         result = IOLoop.instance().run_sync(func)
         assert result == expected
 
 
-    @pytest.mark.parametrize("org_info,expected", user_joins)
+    @pytest.mark.parametrize("org_info,expected", org_user_role)
     def test_can_approve_user_joins(self, org_info, expected):
         u = deepcopy(USER)
         u['organisations']['org0'] = org_info
@@ -228,7 +217,7 @@ class TestUserOrganisation():
         result = IOLoop.instance().run_sync(func)
         assert result == expected
 
-    @pytest.mark.parametrize("org_info,expected", admin_joins)
+    @pytest.mark.parametrize("org_info,expected", org_admin_role)
     def test_can_approve_admin_joins(self, org_info, expected):
         u = deepcopy(USER)
         u['organisations']['org0'] = org_info

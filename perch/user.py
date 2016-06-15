@@ -25,8 +25,6 @@ from .model import Document, SubResource, State
 
 __all__ = ['User', 'UserOrganisation', 'Token']
 
-GLOBAL = 'global'
-
 define('min_length_password', default=3)
 define('max_length_password', default=128)
 define('token_ttl', default=86400)
@@ -61,12 +59,6 @@ class User(Document):
 
     @property
     def schema(cls):
-        default_global = {
-            GLOBAL: {
-                'state': State.approved.name,
-                'role': cls.roles.default.value
-            }
-        }
         orgs_schema = Schema({
             Extra: {
                 'state': validators.validate_state,
@@ -85,9 +77,9 @@ class User(Document):
             Required('email'): validators.valid_email,
             Required('password'): All(unicode, password_length),
             Required('has_agreed_to_terms'): True,
-            Required('organisations', default=default_global): orgs_schema,
-            Required('verified', default=False): bool,
+            Required('organisations', default={}): orgs_schema,
             Required('state', default=User.default_state.name): validators.validate_user_state,
+            Required('role', default=User.roles.default.value): In([x.value for x in User.roles]),
             'first_name': unicode,
             'last_name': unicode,
             'phone': unicode,
@@ -97,13 +89,28 @@ class User(Document):
 
         return schema
 
+    def clean(self):
+        """Verified value is derived from whether user has a verification hash"""
+        result = super(User, self).clean()
+        result['verified'] = 'verification_hash' not in self._resource
+        return result
+
     @coroutine
     def can_update(self, user, **kwargs):
-        # Can only update if admin or user being updated
-        if not (user.id == self.id or user.is_admin()):
-            raise Return((False, set([])))
+        # Sys admin can update everything
+        if user.is_admin():
+            raise Return((True, set([])))
 
-        raise Return((True, set([])))
+        # If user being updated can update everything apart from role
+        if user.id == self.id:
+            fields = ({'role'} & set(kwargs.keys()))
+            if fields:
+                raise Return((False, fields))
+            else:
+                raise Return((True, set([])))
+
+        # Otherwise, cannot update
+        raise Return((False, set([])))
 
     @coroutine
     def check_unique(self):
@@ -119,7 +126,6 @@ class User(Document):
     @classmethod
     @coroutine
     def create(cls, user, password, **kwargs):
-        kwargs['verified'] = False
         kwargs['verification_hash'] = unicode(uuid.uuid4().hex)
 
         resource = cls(password=cls.hash_password(password), **kwargs)
@@ -140,15 +146,10 @@ class User(Document):
         data = {
             'email': email,
             'password': cls.hash_password(password),
-            'verified': True,
             'has_agreed_to_terms': True,
             'state': State.approved,
-            'organisations': {
-                GLOBAL: {
-                    'state': State.approved,
-                    'role': cls.roles.administrator.value
-                }
-            }
+            'role': cls.roles.administrator.value,
+            'organisations': {}
         }
         data.update(**kwargs)
 
@@ -231,24 +232,22 @@ class User(Document):
         :returns: a User instance
         """
         user = yield cls.get(user_id)
-        if user.verified:
+
+        # If user does not have verification hash then this means they have already been verified
+        if 'verification_hash' not in user._resource:
             raise Return(user)
 
-        # NOTE: if the user is not verified and doesn't have a verification
-        # hash, then this will result in an error
-        # TODO: do we need to handle this scenario?
         if user.verification_hash != verification_hash:
             raise exceptions.ValidationError('Invalid verification hash')
 
         del user.verification_hash
-        user.verified = True
         yield user._save()
 
         raise Return(user)
 
     def is_admin(self):
-        """Is the user a "global" administrator"""
-        return self._has_role('global', self.roles.administrator)
+        """Is the user a system administrator"""
+        return self.role == self.roles.administrator.value and self.state == State.approved
 
     def is_org_admin(self, organisation_id):
         """Is the user authorized to administrate the organisation"""
