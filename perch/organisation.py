@@ -76,6 +76,7 @@ class Organisation(Document):
             },
             '_id': unicode,
             '_rev': unicode,
+            'doc_version': unicode,
             'description': unicode,
             'address': unicode,
             'email': Any(validators.valid_email, ''),
@@ -724,7 +725,8 @@ class OAuthSecret(Document):
         Required('_id', default=generate_secret): unicode,
         Required('client_id'): unicode,
         Required('type', default=resource_type): resource_type,
-        '_rev': unicode
+        '_rev': unicode,
+        'doc_version': unicode
     })
 
     @classmethod

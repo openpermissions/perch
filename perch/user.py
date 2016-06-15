@@ -80,6 +80,7 @@ class User(Document):
         schema = Schema({
             '_id': unicode,
             '_rev': unicode,
+            'doc_version': unicode,
             Required('type', default=cls.resource_type): cls.resource_type,
             Required('email'): validators.valid_email,
             Required('password'): All(unicode, password_length),

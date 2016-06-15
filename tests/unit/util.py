@@ -83,7 +83,11 @@ def patch_view(view, docs):
             return {'rows': data.values()}
         else:
             try:
-                return {'rows': [data[key]]}
+                try:
+                    return {'rows': [data[key]]}
+                except TypeError:
+                    # key might be an unhashable list
+                    return {'rows': [data[tuple(key)]]}
             except KeyError:
                 return {'rows': []}
 

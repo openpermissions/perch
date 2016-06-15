@@ -55,12 +55,13 @@ def format_error(invalid, doc_type):
 
 
 class Document(object):
-    internal_fields = ['type', '_id', '_rev']
+    internal_fields = ['type', '_id', '_rev', 'doc_version']
     _resource = {}
     resource_type = None
     schema = Schema({
         '_id': unicode,
-        '_rev': unicode
+        '_rev': unicode,
+        'doc_version': unicode
     }, extra=ALLOW_EXTRA)
     # read only fields can not be changed after the resource has been created
     read_only_fields = []
@@ -122,7 +123,7 @@ class Document(object):
 
     @property
     def _read_only(self):
-        return set(self.read_only_fields) | {'_id', '_rev', 'type'}
+        return set(self.read_only_fields) | {'_id', '_rev', 'type', 'doc_version'}
 
     @property
     def id(self):
@@ -442,6 +443,7 @@ class Document(object):
     def state(self, value):
         self._resource['state'] = value
 
+
 class SubResource(Document):
     _parent = None
     schema = Schema({'id': unicode}, extra=ALLOW_EXTRA)
@@ -475,6 +477,32 @@ class SubResource(Document):
             self._parent = yield self.parent_resource.get(self.parent_id)
 
         raise Return(self._parent)
+
+    @classmethod
+    def parent_resources(cls):
+        """Get a list of parent resources, starting from the Document"""
+        parent = cls.parent_resource
+        parents = [parent]
+
+        try:
+            while True:
+                parent = parent.parent_resource
+                parents.append(parent)
+        except AttributeError:
+            pass
+
+        parents.reverse()
+        return parents
+
+    @classmethod
+    def parent_document(cls):
+        """
+        Walk up all parent_resources to get the Document
+
+        Might not be the same as self.parent_resource because could be a
+        sub-sub-resource
+        """
+        return cls.parent_resources()[0]
 
     @property
     def id(self):
