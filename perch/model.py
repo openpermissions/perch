@@ -123,7 +123,7 @@ class Document(object):
 
     @property
     def _read_only(self):
-        return set(self.read_only_fields) | {'_id', '_rev', 'type'}
+        return set(self.read_only_fields) | {'_id', '_rev', 'type', 'doc_version'}
 
     @property
     def id(self):

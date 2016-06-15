@@ -193,7 +193,7 @@ def _migrate_resource(instance, migrations, version=''):
 
     for migration in migrations[version]['migrations']:
         instance = migration(instance)
-        instance.doc_version = unicode(migration.version)
+        instance._resource['doc_version'] = unicode(migration.version)
 
         instance = _migrate_resource(
             instance,
@@ -232,7 +232,7 @@ def _migrate_subresource(subresource, parent, migrations):
     for key, doc in getattr(parent, subresource.parent_key, {}).items():
         for migration in migrations['migrations']:
             instance = migration(subresource(id=key, **doc))
-            parent.doc_version = unicode(migration.version)
+            parent._resource['doc_version'] = unicode(migration.version)
 
             instance = _migrate_subresources(
                 instance,
