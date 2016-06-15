@@ -12,9 +12,11 @@
 # the License.
 import importlib
 import logging
+import os
 import pkgutil
 from collections import defaultdict
 from functools import wraps
+from uuid import uuid4
 
 from tornado.gen import coroutine
 
@@ -22,6 +24,21 @@ from .views import resource_version
 
 
 __all__ = ['migration', 'Migration', 'collect', 'run_migrations']
+
+MIGRATION_TEMPLATE = """
+from __future__ import unicode_literals
+import perch
+
+VERSION = '{version}'
+PREVIOUS_VERSION = '{previous_version}'
+
+
+@perch.migrate.migration({resource_path}, VERSION, PREVIOUS_VERSION)
+def migrate_{resource_type}(instance):
+    # do stuff here
+
+    return instance
+"""
 
 
 def migration_registry():
@@ -96,6 +113,27 @@ def migration(resource, version, previous_version=''):
         return m
 
     return decorator
+
+
+def create(resource_path, previous_version=None, package='perch.migrations'):
+    """Create a new migration"""
+    pkg, obj = resource_path.rsplit('.', 1)
+    module = importlib.import_module(pkg)
+    resource = getattr(module, obj)
+    version = uuid4().hex
+    target_module = importlib.import_module(package)
+    target_dir = os.path.dirname(target_module.__file__)
+    target_file = os.path.join(target_dir, resource.resource_type + '_' + version + '.py')
+
+    with open(target_file, 'w') as f:
+        f.write(MIGRATION_TEMPLATE.format(
+            resource_path=resource_path,
+            resource_type=resource.resource_type,
+            version=version,
+            previous_version=previous_version or '',
+        ))
+
+    return target_file
 
 
 def collect(package='perch.migrations'):
