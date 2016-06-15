@@ -25,9 +25,14 @@ setup(
     author_email='support@openpermissions.org',
     url='https://github.com/openpermissions/perch',
     packages=['perch'],
+    entry_points='''
+        [console_scripts]
+        perch=perch.cli:cli
+    ''',
     install_requires=["tornado-couchdb==0.2.3",
                       "enum34==1.0.4",
                       "passlib==1.6.2",
                       "python-dateutil==2.5.2",
+                      "click",
                       "voluptuous==0.8.9"]
 )
