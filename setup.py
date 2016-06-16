@@ -24,7 +24,7 @@ setup(
     author='Open Permissions Platform Coalition',
     author_email='support@openpermissions.org',
     url='https://github.com/openpermissions/perch',
-    packages=['perch'],
+    packages=['perch', 'perch.migrations'],
     entry_points='''
         [console_scripts]
         perch=perch.cli:cli
