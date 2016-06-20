@@ -16,6 +16,7 @@ from functools import partial
 
 import click
 from tornado.ioloop import IOLoop
+from tornado.options import options
 
 from . import migrate
 
@@ -43,13 +44,21 @@ def create(resource, previous=None, migrations_path=None):
 
     click.secho('Created migration file: ' + file_path, fg='green')
 
-
 @click.command()
+@click.option('--port', help='The database port')
+@click.option('--url', help='The database URL')
 @click.option('--migrations_path', help='Python path to migrations package, e.g. perch.migrations')
-def run(migrations_path=None):
+def run(migrations_path=None, url=None, port=None):
     """Run migrations"""
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
+
+    if url:
+        url = str(url).rstrip('/')
+        options.url_registry_db = url
+
+    if port:
+        options.db_port = int(port)
 
     if migrations_path:
         migrations = migrate.collect(migrations_path)
