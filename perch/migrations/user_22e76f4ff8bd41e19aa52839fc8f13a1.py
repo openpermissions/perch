@@ -13,7 +13,7 @@ def migrate_user(instance):
     verified flag
     """
     global_org = instance.organisations.pop('global', {})
-    instance.role = global_org.get('role', perch.User.roles.default)
+    instance.role = global_org.get('role', perch.User.roles.default.value)
 
     instance._resource.pop('verified', None)
 
