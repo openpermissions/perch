@@ -12,12 +12,12 @@ def migrate_user(instance):
     Move User.organisations['global']['role'] to top-level property and remove
     verified flag
     """
-    if hasattr(instance, 'role'):
+    instance._resource.pop('verified', None)
+
+    if 'role' in instance._resource:
         return instance
 
     global_org = instance.organisations.pop('global', {})
     instance.role = global_org.get('role', perch.User.roles.default.value)
-
-    instance._resource.pop('verified', None)
 
     return instance
