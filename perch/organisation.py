@@ -89,6 +89,7 @@ class Organisation(Document):
             'youtube': unicode,
             'linkedin': unicode,
             'myspace': unicode,
+            'payment': {'url': validators.validate_url},
             'reference_links': validators.validate_reference_links,
             'logo': Any(validators.validate_url, '', None),
             'modal_header_text': unicode,
