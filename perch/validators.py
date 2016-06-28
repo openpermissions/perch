@@ -70,6 +70,16 @@ def valid_email(email):
     return email
 
 
+def validate_hex(color):
+    """
+    Validate string is a hex color code
+    """
+    hex_re = '^#(?:[0-9a-fA-F]{3}){1,2}$'
+    if not re.match(hex_re, color):
+        raise Invalid('Invalid Hex Color')
+    return color
+
+
 def validate_url(url):
     """Validate URL is valid
 

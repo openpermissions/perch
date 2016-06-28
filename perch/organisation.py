@@ -92,6 +92,8 @@ class Organisation(Document):
             'payment': {'url': validators.validate_url},
             'reference_links': validators.validate_reference_links,
             'logo': Any(validators.validate_url, '', None),
+            'primary_color': validators.validate_hex,
+            'secondary_color': validators.validate_hex,
             'modal_header_text': unicode,
             'modal_footer_text': unicode,
             'modal_link_text': unicode,

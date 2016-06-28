@@ -31,3 +31,15 @@ def test_validate_state_object(state):
 def test_invalid_state():
     with pytest.raises(Invalid):
         validators.validate_state('blah')
+
+
+@pytest.mark.parametrize('color', ['#379392', '#fff'])
+def test_validate_hex(color):
+    assert validators.validate_hex(color) == color
+
+
+@pytest.mark.parametrize('color', ['blah', '#blah', '#ffff', '#fffffff'])
+def test_validate_hex_invalid(color):
+    with pytest.raises(Invalid):
+        validators.validate_hex(color)
+
