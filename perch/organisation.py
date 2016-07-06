@@ -327,7 +327,7 @@ class Service(SubResource):
         Required('created_by'): unicode,
         Required('service_type'): In(SERVICE_TYPES),
         Required('state', default=SubResource.default_state.name): validators.validate_state,
-        'location': validators.validate_url
+        'location': Any(validators.validate_url, '')
     }, validate_service_schema)
 
     @coroutine
