@@ -230,8 +230,10 @@ def organisation_members(doc):
 
 @view('registry')
 def admin_emails(doc):
-    """View for an orginsation's admin email addresses"""
+    """View for admin email addresses (organisation and global)"""
     if doc.get('type') == 'user' and doc.get('state') != 'deactivated':
+        if doc.get('role') == 'administrator':
+            yield None, doc['email']
         for org_id, state in doc.get('organisations', {}).items():
             if state.get('role') == 'administrator' and state.get('state') != 'deactivated':
                 yield org_id, doc['email']
