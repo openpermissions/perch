@@ -84,6 +84,7 @@ class User(Document):
             'last_name': unicode,
             'phone': unicode,
             'verification_hash': unicode,
+            'pre_verified': bool, 
             'actor': unicode  # only used in fixtures, should it be removed?
         })
 
@@ -126,7 +127,8 @@ class User(Document):
     @classmethod
     @coroutine
     def create(cls, user, password, **kwargs):
-        kwargs['verification_hash'] = unicode(uuid.uuid4().hex)
+        if not kwargs['pre_verified']: 
+            kwargs['verification_hash'] = unicode(uuid.uuid4().hex)
 
         resource = cls(password=cls.hash_password(password), **kwargs)
         yield resource._save()
