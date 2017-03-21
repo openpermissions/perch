@@ -36,7 +36,7 @@ class User(Document):
     active_view = views.active_users
     db_name = 'registry'
     internal_fields = (Document.internal_fields +
-                       ['password', 'verification_hash'])
+                       ['password', 'verification_hash', 'pre_verified'])
     read_only_fields = ['created_by']
 
     default_state = State.approved
@@ -55,6 +55,7 @@ class User(Document):
     class roles(Enum):
         administrator = 'administrator'
         user = 'user'
+        reseller = 'reseller'
         default = user
 
     @property
@@ -127,7 +128,7 @@ class User(Document):
     @classmethod
     @coroutine
     def create(cls, user, password, **kwargs):
-        if not kwargs['pre_verified']: 
+        if not kwargs['pre_verified'] or user is None or not user.is_reseller(): 
             kwargs['verification_hash'] = unicode(uuid.uuid4().hex)
 
         resource = cls(password=cls.hash_password(password), **kwargs)
@@ -251,13 +252,17 @@ class User(Document):
         """Is the user a system administrator"""
         return self.role == self.roles.administrator.value and self.state == State.approved
 
+    def is_reseller(self):
+        """is the user a reseller"""
+        return self.role == self.roles.reseller.value and self.state == State.approved
+
     def is_org_admin(self, organisation_id):
         """Is the user authorized to administrate the organisation"""
         return (self._has_role(organisation_id, self.roles.administrator) or
                 self.is_admin())
 
     def is_user(self, organisation_id):
-        """Is the user authorized to administrate the organisation"""
+        """Is the user valid and approved in this organisation"""
         return (self._has_role(organisation_id, self.roles.user) or
                 self.is_org_admin(organisation_id))
 
