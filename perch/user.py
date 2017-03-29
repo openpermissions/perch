@@ -128,7 +128,7 @@ class User(Document):
     @classmethod
     @coroutine
     def create(cls, user, password, **kwargs):
-        if not kwargs['pre_verified'] or user is None or not user.is_reseller(): 
+        if not kwargs.get('pre_verified', False) or user is None or not user.is_reseller(): 
             kwargs['verification_hash'] = unicode(uuid.uuid4().hex)
 
         resource = cls(password=cls.hash_password(password), **kwargs)
