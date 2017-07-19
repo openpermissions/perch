@@ -52,7 +52,7 @@ PERMISSIONS = ['-', 'r', 'w', 'rw']
 class Organisation(Document):
     resource_type = 'organisation'
     db_name = 'registry'
-    internal_fields = Document.internal_fields + ['services', 'repositories']
+    internal_fields = Document.internal_fields + ['services', 'repositories', 'pre_verified']
     read_only_fields = ['created_by']
 
     @property
@@ -100,7 +100,8 @@ class Organisation(Document):
             'modal_header_text': unicode,
             'modal_footer_text': unicode,
             'modal_link_text': unicode,
-            'modal_link_url': Any(validators.validate_url, '', None)
+            'modal_link_url': Any(validators.validate_url, '', None),
+            'pre_verified': bool
         })
 
         return schema
@@ -230,12 +231,13 @@ class Organisation(Document):
     @coroutine
     def can_approve(self, user, **data):
         """
-        Only sys admins can approve an organisation
+        Only sys admins can approve an organisation, or a reseller sending pre_verified=true
         :param user: a User
         :param data: data that the user wants to update
         """
         is_admin = user.is_admin()
-        raise Return(is_admin)
+        is_reseller_preverifying = user.is_reseller() and data.get('pre_verified', False)
+        raise Return(is_admin or is_reseller_preverifying)
 
 
 all_permission_schema = Schema({
@@ -403,6 +405,11 @@ class Service(SubResource):
     def create(cls, user, **kwargs):
         resource = yield super(Service, cls).create(user, **kwargs)
 
+        # if we're logged in as reseller and want to pre-verify then approve the org
+        if user.is_reseller() and kwargs.get('pre_verified', False):
+            resource.state = State.approved
+            yield resource._save()
+        
         # If service is approved on creation, create secret for service
         if resource.state == State.approved:
             yield OAuthSecret.create(user, client_id=resource.id)
@@ -412,7 +419,7 @@ class Service(SubResource):
     @classmethod
     @coroutine
     def can_create(cls, user, **kwargs):
-        raise Return(user.is_user(kwargs['organisation_id']))
+        raise Return(user.is_user(kwargs['organisation_id']) or user.is_reseller())
 
     @coroutine
     def update(self, user, **kwargs):
