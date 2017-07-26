@@ -22,7 +22,6 @@ from voluptuous import All, Extra, In, Length, Required, Schema
 from . import views, exceptions, validators
 from .model import Document, SubResource, State
 
-
 __all__ = ['User', 'UserOrganisation', 'Token']
 
 define('min_length_password', default=3)
@@ -63,7 +62,8 @@ class User(Document):
         orgs_schema = Schema({
             Extra: {
                 'state': validators.validate_state,
-                'role': In([x.value for x in cls.roles])
+                'role': In([x.value for x in cls.roles]),
+                'pre_verified': bool
             }
         }, required=True)
 
@@ -338,14 +338,15 @@ class UserOrganisation(SubResource):
     parent_key = 'organisations'
     view = views.user_organisations_resource
     active_view = views.active_user_organisations_resource
-    internal_fields = ['id', 'user_id']
+    internal_fields = ['id', 'user_id', 'pre_verified']
     editable_states = [State.approved]
 
     schema = Schema({
         'id': unicode,
         'user_id': unicode,
         Required('state', default=SubResource.default_state.name): validators.validate_state,
-        Required('role', default=User.roles.default.value): In([x.value for x in User.roles])
+        Required('role', default=User.roles.default.value): In([x.value for x in User.roles]),
+        'pre_verified': bool
     }, )
 
     @property
@@ -360,7 +361,10 @@ class UserOrganisation(SubResource):
         :param data: data that the user wants to update
         """
         is_org_admin = user.is_org_admin(self.organisation_id)
-        raise Return(is_org_admin)
+
+        is_reseller_preverifying = user.is_reseller() and data.get('pre_verified', False)
+
+        raise Return(is_org_admin or is_reseller_preverifying)
 
     @coroutine
     def can_update(self, user, **kwargs):
