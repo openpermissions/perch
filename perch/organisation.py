@@ -510,6 +510,8 @@ class Repository(SubResource):
     view = views.repositories
     active_view = views.active_repositories
 
+    internal_fields = Document.internal_fields + ['pre_verified']
+
     # State transitions for repositories overridden so that:
     # - Cannot deactivate an approved repository
     # - Repository can move from approved to pending when moved to a new repository service
@@ -541,6 +543,7 @@ class Repository(SubResource):
             all_permission_schema,
             organisation_permission_schema
         )],
+        'pre_verified': bool
     })
 
     def clean(self, user=None):
@@ -636,7 +639,10 @@ class Repository(SubResource):
             service = yield Service.get(service_id)
 
             is_repo_admin = user.is_org_admin(service.organisation_id)
-            raise Return(is_repo_admin)
+
+            is_reseller_preverifying = user.is_reseller() and data.get('pre_verified', False)
+
+            raise Return(is_repo_admin or is_reseller_preverifying)
         except couch.NotFound:
             pass
 
@@ -685,7 +691,7 @@ class Repository(SubResource):
     @classmethod
     @coroutine
     def can_create(cls, user, **kwargs):
-        return user.is_user(kwargs.get('organisation_id'))
+        return user.is_user(kwargs.get('organisation_id')) or (user.is_reseller() and kwargs.get('pre_verified', False))
 
     @coroutine
     def with_relations(self, user=None):
