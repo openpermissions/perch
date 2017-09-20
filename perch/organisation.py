@@ -132,6 +132,16 @@ class Organisation(Document):
 
         raise Return(organisation)
 
+    @classmethod
+    @coroutine
+    def get_by_name(cls, searchName):
+        result = yield views.organisation_name.get(key=searchName, include_docs=True)
+
+        if result['rows']:
+            raise Return([cls(**org['doc']) for org in result['rows']])
+        else:
+            raise exceptions.NotFound()
+
     @coroutine
     def check_unique(self):
         result = yield views.organisation_name.values(key=self.name)
