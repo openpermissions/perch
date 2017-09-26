@@ -48,6 +48,15 @@ SERVICE_TYPES = {
 }
 PERMISSIONS = ['-', 'r', 'w', 'rw']
 
+def cleanString(someText):
+    """
+    remove special characters and spaces from string
+    and convert to lowercase
+    """
+    ret = ''
+    if someText is not None:
+        ret = filter(unicode.isalnum, someText.lower())
+    return ret
 
 class Organisation(Document):
     resource_type = 'organisation'
@@ -144,14 +153,17 @@ class Organisation(Document):
 
     @coroutine
     def check_unique(self):
-        result = yield views.organisation_name.values(key=self.name)
+        result = yield views.organisation_name.get()
 
         org_id = getattr(self, 'id', None)
-        orgs = {x for x in result if x != org_id and x}
+        org_name = cleanString(getattr(self, 'name', None))
 
-        if orgs:
-            raise exceptions.ValidationError(
-                "Organisation with name '{}' already exists".format(self.name))
+        gen = (x for x in result['rows'])
+
+        for x in gen:
+            if cleanString(x['key']) == org_name and x['id'] != org_id:
+                raise exceptions.ValidationError(
+                    "Organisation with name '{}' already exists".format(org_name))
 
     @classmethod
     @coroutine
