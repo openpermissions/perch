@@ -144,21 +144,26 @@ class Organisation(Document):
     @classmethod
     @coroutine
     def get_by_name(cls, searchName):
-        result = yield views.organisation_name.get(key=searchName, include_docs=True)
+        orgs = yield views.organisation_name.get()
 
-        if result['rows']:
-            raise Return([cls(**org['doc']) for org in result['rows']])
-        else:
-            raise exceptions.NotFound()
+        searchName = cleanString(searchName)
 
+        gen = (x for x in orgs['rows'])
+
+        for x in gen:
+            if cleanString(x['key']) == searchName:
+                org = yield cls.get(x['id'])
+                raise Return([org])
+                
+        raise exceptions.NotFound()
     @coroutine
     def check_unique(self):
-        result = yield views.organisation_name.get()
+        orgs = yield views.organisation_name.get()
 
         org_id = getattr(self, 'id', None)
         org_name = cleanString(getattr(self, 'name', None))
 
-        gen = (x for x in result['rows'])
+        gen = (x for x in orgs['rows'])
 
         for x in gen:
             if cleanString(x['key']) == org_name and x['id'] != org_id:
