@@ -153,8 +153,9 @@ class Organisation(Document):
         for x in gen:
             if cleanString(x['key']) == searchName:
                 org = yield cls.get(x['id'])
-                raise Return([org])
-                
+                if org.state == State.approved:
+                    raise Return([org])
+
         raise exceptions.NotFound()
     @coroutine
     def check_unique(self):
