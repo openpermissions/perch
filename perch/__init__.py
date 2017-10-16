@@ -13,7 +13,7 @@ from .user import *
 from .organisation import *
 from . import migrate
 
-__version__ = '0.16.2'
+__version__ = '0.16.3'
 
 define('db_port', default=5984)
 define('url_registry_db', default='http://localhost')
